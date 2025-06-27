@@ -12,6 +12,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from loguru import logger
 
+from llmc.utils import copy_files
 from llmc.utils.registry_factory import KV_REGISTRY, TOKEN_REDUCTION_REGISTRY
 
 from ..blockwise_optimization import BlockwiseOpt
@@ -1036,3 +1037,5 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.model.get_model().save_pretrained(path)
             logger.info('save model done --')
             self.copy_tokenizer(path)
+            copy_files(self.config.model.path, path, 'preprocessor_config')
+            copy_files(self.config.model.path, path, 'chat_template')
