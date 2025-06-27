@@ -1,0 +1,66 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL
+    path: /workspace-voice-nlp/gaoy25@xiaopeng.com/dataset/xprt/original_model/v0-20250601-000047/
+    tokenizer_mode: slow
+    torch_dtype: auto
+eval:
+    eval_pos: [transformed, fake_quant]
+    name: wikitext2
+    download: True
+    path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset
+    seq_len: 2048
+    # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+    # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+    bs: 1
+    inference_per_block: False
+quant:
+    method: SpinQuant
+    weight:
+        bit: 8
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+        calib_algo: 
+        ste: True
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_token
+        qmax_to_tensor: True
+        ste: True
+    special:
+        rotate_mode: hadamard
+        fp32_had: True
+        online_rotate: False
+train:
+    data:
+        name: wikitext2
+        download: True
+        path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset
+        n_samples: 800
+        bs: 1
+        seq_len: 2048
+        preproc: wikitext2_gptq
+        seed: *seed
+        cache_dir: None
+    train_args:
+        fp16: False
+        bf16: True
+        log_on_each_node: False
+        per_device_train_batch_size: 1
+        logging_steps: 1
+        learning_rate: 1.5
+        weight_decay: 0.
+        lr_scheduler_type: "cosine"
+        gradient_checkpointing: True
+        max_steps: 100
+        output_dir: ./out/
+        logging_dir: ./log/
+        logging_first_step: True
+save:
+    # Save the Spinquant-transformed model.
+    save_trans: True
+    save_fake: False
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant

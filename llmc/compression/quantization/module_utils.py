@@ -45,6 +45,109 @@ def block_wise_fp8_forward_func(x, w, w_scale, block_size, bias):
     return y
 
 
+class OriginEmbedding(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim, padding_idx,
+                 max_norm, norm_type, scale_grad_by_freq,
+                 sparse, weight):
+        super(OriginEmbedding, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = padding_idx
+        self.max_norm = max_norm
+        self.norm_type = norm_type
+        self.scale_grad_by_freq = scale_grad_by_freq
+        self.sparse = sparse
+        self.weight = weight
+
+    def forward(self, input):
+        return F.embedding(
+            input, self.weight, self.padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq, self.sparse)
+        
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module):
+
+        num_embeddings = module.num_embeddings
+        embedding_dim = module.embedding_dim
+        padding_idx = module.padding_idx
+        max_norm = module.max_norm
+        norm_type = module.norm_type
+        scale_grad_by_freq = module.scale_grad_by_freq
+        sparse = module.sparse
+        weight = module.weight
+
+        new_module = cls(num_embeddings, embedding_dim, padding_idx,
+                 max_norm, norm_type, scale_grad_by_freq,
+                 sparse, weight)
+        return new_module
+
+    def __repr__(self):
+        return (
+            f"OriginEmbedding({self.num_embeddings}, "
+            f"{self.embedding_dim}, "
+            f"padding_idx={self.padding_idx}),"
+        )
+
+
+class RotateEmbedding(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim, padding_idx,
+                 max_norm, norm_type, scale_grad_by_freq,
+                 sparse, weight, w_rot):
+        super(RotateEmbedding, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = padding_idx
+        self.max_norm = max_norm
+        self.norm_type = norm_type
+        self.scale_grad_by_freq = scale_grad_by_freq
+        self.sparse = sparse
+        self.weight = weight
+        self.bias = None
+        self.w_rot = w_rot
+
+    def forward(self, input):
+    
+        tmp_weight = self._rotate_weight()
+
+        return F.embedding(
+            input, tmp_weight, self.padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq, self.sparse)
+    
+    def _rotate_weight(self):
+        if self.w_rot is not None:
+            tmp_weight, _ = self.w_rot(self)
+        else:
+            tmp_weight = self.weight
+        return tmp_weight
+        
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_rot):
+
+        num_embeddings = module.num_embeddings
+        embedding_dim = module.embedding_dim
+        padding_idx = module.padding_idx
+        max_norm = module.max_norm
+        norm_type = module.norm_type
+        scale_grad_by_freq = module.scale_grad_by_freq
+        sparse = module.sparse
+        weight = module.weight
+
+        new_module = cls(num_embeddings, embedding_dim, padding_idx,
+                 max_norm, norm_type, scale_grad_by_freq,
+                 sparse, weight, w_rot)
+        return new_module
+
+    def __repr__(self):
+        return (
+            f"RotateEmbedding({self.num_embeddings}, "
+            f"{self.embedding_dim}, "
+            f"w_rotate={self.w_rot is not None}, "
+            f"padding_idx={self.padding_idx})"
+        )
+
+
 class FakeAffineLayerNorm(nn.Module):
     def __init__(self, norm, shape):
         super().__init__()
@@ -502,6 +605,81 @@ class Rotater:
             x = x.reshape(init_shape)
 
         return x
+
+
+class RotateLinear2(nn.Module):
+    def __init__(self, weight, bias, ori_module, w_rot, a_rot):
+        super().__init__()
+        self.register_buffer("weight", weight)
+        if bias is not None:
+            self.register_buffer("bias", bias)
+        else:
+            self.bias = None
+
+        for name, buf in ori_module.named_buffers():
+            if name.startswith("buf_"):
+                self.register_buffer(name, buf.data)
+
+        self.w_rot = w_rot
+        self.a_rot = a_rot
+
+        self.register_buffer("buf_w_rotate", torch.tensor(w_rot is not None))
+        self.register_buffer("buf_a_rotate", torch.tensor(a_rot is not None))
+
+    def forward(self, x):
+
+        if self.buf_a_rotate:
+            x = self.a_rot(x, self)
+
+        if self.buf_w_rotate:
+            tmp_weight, tmp_bias = self._rotate_weight()
+            self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+            self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+
+        weight = getattr(self, "tmp_weight", self.weight)
+        bias = getattr(self, "tmp_bias", self.bias)
+        x = torch.functional.F.linear(x, weight, bias)
+        return x
+    
+    def _rotate_weight(self):
+        tmp_weight, tmp_bias = self.w_rot(self)
+        return tmp_weight, tmp_bias
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_rot, a_rot):
+        weight = module.weight.data
+        if module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(
+            weight,
+            bias,
+            ori_module=module,
+            w_rot=w_rot,
+            a_rot=a_rot
+        )
+        new_module.in_features = module.in_features
+        new_module.out_features = module.out_features
+        return new_module
+
+    @classmethod
+    def get_func_name(cls, any_callable):
+        if isinstance(any_callable, partial):
+            return any_callable.func.__name__
+        return any_callable.__name__
+
+    def __repr__(self):
+        return (
+            f"RotateLinear2(in_features={self.in_features}, "
+            f"out_features={self.out_features}, "
+            f"bias={self.bias is not None}, "
+            f"w_rotate={self.buf_w_rotate}, "
+            f"a_rotate={self.buf_a_rotate})"
+        )
+
 
 
 class RotateLinear(nn.Module):

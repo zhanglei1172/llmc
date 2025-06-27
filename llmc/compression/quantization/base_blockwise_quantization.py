@@ -18,6 +18,7 @@ from llmc.utils.registry_factory import KV_REGISTRY, TOKEN_REDUCTION_REGISTRY
 from ..blockwise_optimization import BlockwiseOpt
 from .attn_utils import _LLMC_ATTN_MAP_
 from .auto_clip import AutoClipper
+from .rotate_utils import ActRotater, WeightRotater
 from .utils import is_fp8_supported_gpu
 
 if is_fp8_supported_gpu():
@@ -35,7 +36,8 @@ from .module_utils import (_LLMC_LINEAR_TYPES_, _LLMC_LN_TYPES_,
                            _REALQUANT_LINEAR_MAP_, _TRANSFORMERS_LINEAR_TYPES_,
                            _TRANSFORMERS_LN_TYPES_, EffcientFakeQuantLinear,
                            FakeQuantLinear, LlmcActFn, OriginFloatLinear,
-                           RotateLinear)
+                           RotateLinear,
+                           RotateLinear2)
 from .quant import FloatQuantizer, IntegerQuantizer, Weight48IntegerQuantizer
 
 
@@ -82,7 +84,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         else:
             return aquantizer.fake_quant_act_dynamic(act)
 
-    def get_replacement_params(self, mode='fake_quant', w_only=False, name=None):
+    def get_replacement_params(self, mode='fake_quant', w_only=False, name=None, args={}):
         params_dict = {}
         if mode in ['fake_quant', 'fake_quant_wo_kv']:
             params_dict['a_qdq'] = (
@@ -128,6 +130,32 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
 
         elif mode == 'quant_act_fn':
             params_dict = {'a_qdq': partial(self.a_qdq, aquantizer=self.aquantizer)}
+        
+        elif mode == 'rotate':
+            params_dict['w_rot'], params_dict['a_rot'] = None, None
+            if hasattr(self, 'weight_rotate') and self.weight_rotate:
+                params_dict['w_rot'] = partial(self.w_rot, w_rotater=self.w_rotater, args=args)
+
+            if hasattr(self, 'online_rotate') and self.online_rotate:
+                if hasattr(self, 'weight_rotate') and self.weight_rotate:
+                    if name is None or not 'down_proj' in name:
+                        return params_dict
+                else:
+                    if name is None or not ('down_proj' in name):
+                        return params_dict
+
+                had_K, K = get_hadK(
+                    self.intermediate_size if 'down_proj' in name else self.num_heads
+                )
+                a_rotater = ActRotater(
+                    online_full_had=True if 'down_proj' in name else False,
+                    online_partial_had=True if 'o_proj' in name else False,
+                    fp32_had=self.fp32_had,
+                    K=K,
+                    had_K=had_K,
+                    had_dim=None if 'down_proj' in name else self.hidden_size // self.num_heads,
+                )
+                params_dict['a_rot'] = partial(self.a_rot, a_rotater=a_rotater)
 
         return params_dict
 
@@ -299,6 +327,31 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                         mode='online_rotate', w_only=self.w_only, name=n
                     ),
                 )
+
+    def replace_rotate_fc(self, block, n, m, Q1=None, Q2=None, transpose=False):
+        args = {}
+        if hasattr(self, 'weight_rotate') and self.weight_rotate:
+            args['Q1'] = Q1
+            args['Q2'] = Q2
+            args['transpose'] = transpose
+
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=n, args=args)
+        if params_dict == {}:
+            return
+
+        subset = {'layers': {n: m}}
+        self.model.replace_module_subset(
+            RotateLinear2,
+            block,
+            subset,
+            self.block_idx,
+            params_dict
+        )
+
+    def replace_rotate_fcs(self, block):
+        for n, m in block.named_modules():
+            if isinstance(m, nn.Linear):
+               self.replace_rotate_fc(block, n, m)
 
     def replace_act_fn(self, block, extra_modules):
         act_fn_dict = self.model.get_act_fn_in_block(block)
@@ -829,6 +882,23 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             dtype = layer.weight.data.dtype
             W = layer.weight.data.to(device=self.dev, dtype=torch.float64)
             layer.weight.data = torch.matmul(W, Q).to(device='cpu', dtype=dtype)
+
+    def rotate_weight(self, weight, bias, Q, transpose):
+        dtype = weight.dtype
+        dev = weight.data.device
+        R_b = bias
+
+        W = weight.data.to(device=dev, dtype=torch.float64)
+        Q = Q.to(device=dev, dtype=torch.float64)
+        if not transpose:
+            R_W = torch.matmul(W, Q).to(device='cpu', dtype=dtype)
+        else:
+            R_W = torch.matmul(Q.T, W).to(device='cpu', dtype=dtype)
+            if bias is not None:
+                b = bias.data.to(device=dev, dtype=torch.float64)
+                R_b = torch.matmul(Q.T, b).to(device='cpu', dtype=dtype)
+
+        return R_W, R_b
 
     def fuse_ln_fcs(self, ln, fcs):
         for fc in fcs:

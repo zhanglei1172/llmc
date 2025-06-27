@@ -15,6 +15,18 @@ except Exception:
 # Adapted from
 # https://github.com/Cornell-RelaxML/quip-sharp/blob/main/lib/utils/matmul_had.py
 
+class HadamardTransform(torch.autograd.Function):
+    """The unnormalized Hadamard transform (i.e. without dividing by
+    sqrt(2))"""
+
+    @staticmethod
+    def forward(ctx, u):
+        return fast_hadamard_transform.hadamard_transform(u)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return fast_hadamard_transform.hadamard_transform(grad)
+
 
 def get_hadK(n, transpose=False):
     hadK, K = None, None
