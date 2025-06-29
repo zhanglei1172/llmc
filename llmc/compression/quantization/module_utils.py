@@ -44,6 +44,14 @@ def block_wise_fp8_forward_func(x, w, w_scale, block_size, bias):
         y += bias
     return y
 
+def get_module_name(model, module):
+    """
+    Get the name of the module in the model.
+    """
+    for name, mod in model.named_modules():
+        if mod is module:
+            return name
+    return None
 
 class OriginEmbedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, padding_idx,
@@ -1298,6 +1306,7 @@ _LLMC_LINEAR_TYPES_ = [
     LlmcFp8Linear,
     OriginFloatLinear,
     RotateLinear,
+    RotateLinear2,
     FakeQuantLinear,
     EffcientFakeQuantLinear,
     VllmRealQuantLinear,

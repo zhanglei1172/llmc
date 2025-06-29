@@ -13,7 +13,7 @@ from .module_utils import *
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
                            EffcientFakeQuantLinear, FakeQuantLinear,
                            LlmcRMSNorm, OriginEmbedding, OriginFloatLinear,
-                           RotateEmbedding, RotateLinear2)
+                           RotateEmbedding, RotateLinear2, get_module_name)
 from .rotate_utils import ActRotater, RotateModule, WeightRotater
 
 
@@ -96,6 +96,39 @@ class SpinQuant(BaseBlockwiseQuantization):
             params_dict
         )
         self.model.find_embed_layers()
+        layers_dict = {}
+        args['transpose'] = True
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        for rot_layer in self.model.get_extra_rot_module_besides_embed_layers():
+            logger.info('For multimodal model, quarot need rotate last layer in projector.')
+            logger.info(f'rot_layer : {rot_layer}')
+            # docformatter: off
+            """
+            txt_input     img_input
+                |             |
+            Embedding      vision_projector
+                |             |
+                       |
+                  input_embeds
+                       |
+                       Y
+            Therefore:
+            X_txt ~ W_embedding * Q = X_txt ~ (W_embedding * Q)
+            X_proj * W_proj.t() * Q = X_proj * (Q.t() * W_proj).t()
+            """
+            module_name = get_module_name(self.model.model, rot_layer)
+            if module_name is None:
+                raise ValueError(f'Cannot find module name for {rot_layer}. Please check the model structure.')
+            logger.info(f'Replacing module {module_name} with RotateLinear2')
+            layers_dict[module_name] = rot_layer
+        if layers_dict:
+            self.model.replace_module_subset(
+                RotateLinear2,
+                self.model.model,
+                {'layers': layers_dict},
+                None,
+                params_dict
+            )
 
     def register_lmhead_spin_parameters(self):
         lm_head_layer = self.model.get_head_layers()[0]
