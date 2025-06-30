@@ -437,10 +437,10 @@ class LlmcRMSNorm(nn.Module):
 
     def forward(self, hidden_states):
         input_dtype = hidden_states.dtype
-        # variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        # hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return F.rms_norm(hidden_states, self.weight.shape, self.weight, self.variance_epsilon).to(input_dtype)
-        # return hidden_states
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        # return F.rms_norm(hidden_states, self.weight.shape, self.weight, self.variance_epsilon).to(input_dtype)
+        return hidden_states.to(input_dtype)
 
     @classmethod
     @torch.no_grad()

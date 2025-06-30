@@ -46,10 +46,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
         self.fuse_ln_fcs(pre_head_ln, self.model.get_head_layers())
 
+        pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
         self.model.replace_module_subset(
             LlmcRMSNorm,
             self.model.model,
-            {'layers': {'model.norm': pre_head_ln}},
+            {'layers': {pre_head_ln_name: pre_head_ln}},
             None,
             {},
         )
@@ -88,10 +89,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         args['transpose'] = False
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
         params_dict.pop('a_rot')
+        embedding_layer_name = get_module_name(self.model.model, embedding_layer)
         self.model.replace_module_subset(
             RotateEmbedding,
             self.model.model,
-            {'layers': {'model.embed_tokens': embedding_layer}},
+            {'layers': {embedding_layer_name: embedding_layer}},
             None,
             params_dict
         )
@@ -137,10 +139,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         args['Q2'] = None
         args['transpose'] = False
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        lm_head_layer_name = get_module_name(self.model.model, lm_head_layer)
         self.model.replace_module_subset(
             RotateLinear2,
             self.model.model,
-            {'layers': {'lm_head': lm_head_layer}},
+            {'layers': {lm_head_layer_name: lm_head_layer}},
             None,
             params_dict
         )
@@ -160,10 +163,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(embedding_layer, RotateEmbedding):
             weight = embedding_layer._rotate_weight()
             embedding_layer.weight.data = weight
+            embedding_layer_name = get_module_name(self.model.model, embedding_layer)
             self.model.replace_module_subset(
                 OriginEmbedding,
                 self.model.model,
-                {'layers': {'model.embed_tokens': embedding_layer}},
+                {'layers': {embedding_layer_name: embedding_layer}},
                 None,
                 {}
             )
@@ -173,10 +177,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(lm_head_layer, RotateLinear2):
             weight, bias = lm_head_layer._rotate_weight()
             lm_head_layer.weight, lm_head_layer.bias = weight, bias
+            lm_head_layer_name = get_module_name(self.model.model, lm_head_layer)
             self.model.replace_module_subset(
                 OriginFloatLinear,
                 self.model.model,
-                {'layers': {'lm_head': lm_head_layer}},
+                {'layers': {lm_head_layer_name: lm_head_layer}},
                 None,
                 {}
             )

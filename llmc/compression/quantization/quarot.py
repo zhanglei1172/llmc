@@ -11,7 +11,7 @@ from llmc.utils.registry_factory import ALGO_REGISTRY
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
-                           LlmcRMSNorm, RotateLinear)
+                           LlmcRMSNorm, RotateLinear, get_module_name)
 
 
 @ALGO_REGISTRY
@@ -40,10 +40,11 @@ class Quarot(BaseBlockwiseQuantization):
         pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
         self.fuse_ln_fcs(pre_head_ln, self.model.get_head_layers())
 
+        pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
         self.model.replace_module_subset(
             LlmcRMSNorm,
             self.model.model,
-            {'layers': {'model.norm': pre_head_ln}},
+            {'layers': {pre_head_ln_name: pre_head_ln}},
             None,
             {},
         )
