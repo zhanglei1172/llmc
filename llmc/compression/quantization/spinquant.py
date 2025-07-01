@@ -99,6 +99,9 @@ class SpinQuant(BaseBlockwiseQuantization):
         )
         self.model.find_embed_layers()
         layers_dict = {}
+        args = {}
+        args['Q1'] = self.model.model.Q1
+        args['Q2'] = None
         args['transpose'] = True
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
         for rot_layer in self.model.get_extra_rot_module_besides_embed_layers():

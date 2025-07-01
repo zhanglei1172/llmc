@@ -43,6 +43,11 @@ class WeightRotater:
                     tmp_weight = tmp_weight.reshape(-1, transposed_shape[-1] // had_dim, had_dim)
                     tmp_weight, _ = self.rotate_func(tmp_weight, bias, Q2.weight, False)
                     tmp_weight = tmp_weight.reshape(transposed_shape).t()
+                if bias is not None and not transpose:
+                    dtype = bias.dtype
+                    dev = bias.data.device
+                    bias_shape = bias.shape
+                    tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).data.to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device='cpu', dtype=dtype).reshape(bias_shape)
 
         if Q1 is None and Q2 is None:
             tmp_weight = weight
