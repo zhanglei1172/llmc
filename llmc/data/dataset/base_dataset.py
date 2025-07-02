@@ -207,15 +207,22 @@ class BaseDataset(metaclass=ABCMeta):
                             custom_dataset_path, custom_data_samples[idx]['image'][img_idx]
                         )
                 else:
-                    custom_data_samples[idx]['image'] = os.path.join(
-                        custom_dataset_path, custom_data_samples[idx]['image']
-                    )
+                    # custom_data_samples[idx]['image'] = os.path.join(
+                    #     custom_dataset_path, custom_data_samples[idx]['image']
+                    # )
+                    custom_data_samples[idx]['image'] = f"data:image;base64,{custom_data_samples[idx]['image']}"
             else:
                 custom_data_samples[idx]['image'] = None
             if 'question' not in custom_data_samples[idx]:
-                custom_data_samples[idx]['question'] = ''
+                if 'prompt' in custom_data_samples[idx]:
+                    custom_data_samples[idx]['question'] = custom_data_samples[idx]['prompt']
+                else:
+                    custom_data_samples[idx]['question'] = ''
             if 'answer' not in custom_data_samples[idx]:
-                custom_data_samples[idx]['answer'] = ''
+                if 'label' in custom_data_samples[idx]:
+                    custom_data_samples[idx]['answer'] = custom_data_samples[idx]['label']
+                else:
+                    custom_data_samples[idx]['answer'] = ''
             if 'prompt' not in custom_data_samples[idx]:
                 custom_data_samples[idx]['prompt'] = ''
             if 'negative_prompt' not in custom_data_samples[idx]:

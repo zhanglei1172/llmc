@@ -409,6 +409,18 @@ class BaseModel(metaclass=ABCMeta):
             torch.cuda.empty_cache()
         logger.info(f'The Replaced model: {self.model}')
 
+    def replace_module_all(self, module, params_dict):
+        for block_idx in range(len(self.blocks)):
+            logger.info(f'Replace block index: {block_idx}/{len(self.blocks)}')
+            block = self.blocks[block_idx]
+            block = block.cuda()
+            self.replace_module_block(module, block, block_idx, params_dict)
+            block = block.cpu()
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        logger.info(f'The Replaced model: {self.model}')
+
     def replace_module_block(self, module, block, block_idx, params_dict):
         if module in _LLMC_LN_TYPES_ + _TRANSFORMERS_LN_TYPES_:
             self.replace_module_layernorm(

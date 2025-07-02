@@ -32,7 +32,7 @@ class BaseEval:
             'custom_gen',
             't2v',
             'i2v',
-        ], f'Not support {self.dataset} dataset now.'
+        ], f'Not support {self.dataset_type} dataset now.'
         self.seq_len = self.eval_cfg.get('seq_len', None)
         self.num_samples = self.eval_cfg.get('num_samples', None)
         self.num_eval_tokens = self.eval_cfg.get('num_eval_tokens', None)
