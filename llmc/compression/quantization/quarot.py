@@ -73,6 +73,9 @@ class Quarot(BaseBlockwiseQuantization):
             device = self.Q.device
             W = rot_layer.weight.data.to(device=device, dtype=torch.float64)
             rot_layer.weight.data = torch.matmul(self.Q.T, W).to(device='cpu', dtype=dtype) # noqa
+            if rot_layer.bias is not None:
+                b = rot_layer.bias.data.to(device=device, dtype=torch.float64)
+                rot_layer.bias.data = torch.matmul(self.Q.T, b).to(device='cpu', dtype=dtype)
 
         gc.collect()
         torch.cuda.empty_cache()
