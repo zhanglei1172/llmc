@@ -20,6 +20,7 @@ from .attn_utils import _LLMC_ATTN_MAP_
 from .auto_clip import AutoClipper
 from .rotate_utils import ActRotater, WeightRotater
 from .utils import is_fp8_supported_gpu
+from .constant import *
 
 if is_fp8_supported_gpu():
     from .kernel import weight_cast_to_bf16, weight_cast_to_fp8
@@ -874,14 +875,14 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         for layer in embeddings:
             dtype = layer.weight.data.dtype
             W = layer.weight.data.to(device=self.dev, dtype=torch.float64)
-            layer.weight.data = torch.matmul(W, Q).to(device='cpu', dtype=dtype)
+            layer.weight.data = torch.matmul(W, Q).to(device=ROTATE_DEV, dtype=dtype)
 
     def rotate_head(self, Q):
         heads = self.model.get_head_layers()
         for layer in heads:
             dtype = layer.weight.data.dtype
             W = layer.weight.data.to(device=self.dev, dtype=torch.float64)
-            layer.weight.data = torch.matmul(W, Q).to(device='cpu', dtype=dtype)
+            layer.weight.data = torch.matmul(W, Q).to(device=ROTATE_DEV, dtype=dtype)
 
     def rotate_weight(self, weight, bias, Q, transpose):
         dtype = weight.dtype
@@ -891,12 +892,12 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         W = weight.data.to(device=dev, dtype=torch.float64)
         Q = Q.to(device=dev, dtype=torch.float64)
         if not transpose:
-            R_W = torch.matmul(W, Q).to(device='cpu', dtype=dtype)
+            R_W = torch.matmul(W, Q).to(device=ROTATE_DEV, dtype=dtype)
         else:
-            R_W = torch.matmul(Q.T, W).to(device='cpu', dtype=dtype)
+            R_W = torch.matmul(Q.T, W).to(device=ROTATE_DEV, dtype=dtype)
             if bias is not None:
                 b = bias.data.to(device=dev, dtype=torch.float64)
-                R_b = torch.matmul(Q.T, b).to(device='cpu', dtype=dtype)
+                R_b = torch.matmul(Q.T, b).to(device=ROTATE_DEV, dtype=dtype)
 
         return R_W, R_b
 

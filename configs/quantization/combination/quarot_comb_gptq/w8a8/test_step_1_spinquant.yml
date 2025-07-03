@@ -8,8 +8,8 @@ model:
 eval:
     eval_pos: [transformed, fake_quant]
     name: wikitext2
-    download: True
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset
+    download: False
+    path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset/eval/wikitext2
     seq_len: 2048
     # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
@@ -37,14 +37,14 @@ quant:
 train:
     data:
         name: wikitext2
-        download: True
-        path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset
+        download: False
+        path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset/calib/wikitext2
         n_samples: 800
         bs: 1
         seq_len: 2048
         preproc: wikitext2_gptq
         seed: *seed
-        cache_dir: None
+        cache_dir: 
     train_args:
         fp16: False
         bf16: True
@@ -59,8 +59,9 @@ train:
         output_dir: ./out/
         logging_dir: ./log/
         logging_first_step: True
+        report_to: 
 save:
     # Save the Spinquant-transformed model.
     save_trans: True
     save_fake: False
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant2

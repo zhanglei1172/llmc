@@ -1,5 +1,7 @@
 import gc
+import os
 from functools import partial
+import json
 
 import torch
 import torch.nn as nn
@@ -11,9 +13,9 @@ from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import *
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
-                           EffcientFakeQuantLinear, FakeQuantLinear,
+                           EffcientFakeQuantLinear, FakeQuantLinear, RotateFakeQuantLinear,
                            LlmcRMSNorm, OriginEmbedding, OriginFloatLinear,
-                           RotateEmbedding, RotateLinear2, get_module_name)
+                           RotateEmbedding, RotateLinear2,_REALQUANT_LINEAR_MAP_, get_module_name)
 from .rotate_utils import ActRotater, RotateModule, WeightRotater
 
 
@@ -134,6 +136,7 @@ class SpinQuant(BaseBlockwiseQuantization):
                 None,
                 params_dict
             )
+        self._vision_rotate_layers = layers_dict
 
     def register_lmhead_spin_parameters(self):
         lm_head_layer = self.model.get_head_layers()[0]
@@ -155,13 +158,13 @@ class SpinQuant(BaseBlockwiseQuantization):
         for idx, block in enumerate(self.blocks):
             logger.info(f'Start apply {idx}-th block rotate weights')
             for name, module in block.named_modules():
-                if isinstance(module, (RotateLinear2, FakeQuantLinear)):
+                if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
                     module.weight, module.bias = weight, bias
             logger.info(f'End apply {idx}-th block rotate weights')
 
     def apply_embedding_rotate_weight(self):
-
+        self.model.find_embed_layers()
         embedding_layer = self.model.get_embed_layers()[0]
         if isinstance(embedding_layer, RotateEmbedding):
             weight = embedding_layer._rotate_weight()
@@ -242,12 +245,32 @@ class SpinQuant(BaseBlockwiseQuantization):
                 self.replace_rotate_fc(block, n, m, Q1=self.model.model.Q1, Q2=block.self_attn.Q2, transpose=True)
                 self.replace_rotate_fc(block, 'self_attn.v_proj', prev_op[0], Q1=self.model.model.Q1, Q2=block.self_attn.Q2, transpose=False)
 
+    def get_ignored_modules(self):
+        return [self.model.model.Q1] + [
+            block.self_attn.Q2 for block in self.model.get_blocks()
+        ]
+
     def apply_rotate_weight(self):
         self.apply_embedding_rotate_weight()
         self.apply_lmhead_rotate_weight()
         self.apply_fc_rotate_weight()
+        if hasattr(self, "_vision_rotate_layers"):
+            for module_name in self._vision_rotate_layers:
+                module = self.model.model.get_submodule(module_name)
+                if isinstance(module, (RotateLinear2, RotateFakeQuantLinear)):
+                    weight, bias = module._rotate_weight()
+                    module.weight, module.bias = weight, bias
+                self.model.replace_module_subset(
+                    OriginFloatLinear,
+                    self.model.model,
+                    {'layers': {module_name: module}},
+                    None,
+                    {}
+                )
+                del self._vision_rotate_layers
 
-    def deploy(self, quant_format):
+
+    def deploy(self, quant_format, keep_device=False):
         if quant_format == 'train_rotate_quant':
             logger.info(f'-- deploy_{quant_format}_model start --')
             logger.info(f'quant_config : {self.quant_config}')
@@ -261,11 +284,23 @@ class SpinQuant(BaseBlockwiseQuantization):
                 else None
             )
             self.model.replace_module_all(
-                FakeQuantLinear, params_dict
+                RotateFakeQuantLinear, params_dict
             )
 
             logger.info(f'-- deploy_{quant_format}_model done --')
             logger.info(f'-- strat train rotation--')
         else:
-            self.apply_rotate_weight()
-            super().deploy(quant_format)
+            with torch.no_grad():
+                self.apply_rotate_weight()
+                super().deploy(quant_format)
+
+    @torch.no_grad()
+    def save_model(self, path):
+        super().save_model(path)
+        path = os.path.join(path, 'config.json')
+        with open(path, 'r') as f:
+            config = json.load(f)
+        if 'tie_word_embeddings' in config:
+            config['tie_word_embeddings'] = False
+        with open(path, 'w') as f:
+            json.dump(config, f, indent=4)

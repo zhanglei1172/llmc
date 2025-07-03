@@ -12,6 +12,7 @@ from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
                            LlmcRMSNorm, RotateLinear, get_module_name)
+from .constant import *
 
 
 @ALGO_REGISTRY
@@ -72,10 +73,10 @@ class Quarot(BaseBlockwiseQuantization):
             dtype = rot_layer.weight.dtype
             device = self.Q.device
             W = rot_layer.weight.data.to(device=device, dtype=torch.float64)
-            rot_layer.weight.data = torch.matmul(self.Q.T, W).to(device='cpu', dtype=dtype) # noqa
+            rot_layer.weight.data = torch.matmul(self.Q.T, W).to(device=ROTATE_DEV, dtype=dtype) # noqa
             if hasattr(rot_layer, 'bias') and rot_layer.bias is not None:
                 b = rot_layer.bias.data.to(device=device, dtype=torch.float64)
-                rot_layer.bias.data = torch.matmul(self.Q.T, b).to(device='cpu', dtype=dtype)
+                rot_layer.bias.data = torch.matmul(self.Q.T, b).to(device=ROTATE_DEV, dtype=dtype)
 
         gc.collect()
         torch.cuda.empty_cache()

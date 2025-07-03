@@ -3,9 +3,20 @@ base:
 model:
     type: Qwen25VL
     # Load Quarot-transformed model
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot3/transformed_model
+    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot/transformed_model
     # path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant/transformed_model
     torch_dtype: auto
+# calib:
+#     name: custom_mm
+#     download: False
+#     path: /code/lim42@xiaopeng.com/llmc_test/v3_calib_data/
+#     add_answer: False
+#     apply_chat_template: True
+#     n_samples: 500
+#     bs: -1
+#     seq_len: 2048
+#     padding: True
+#     seed: *seed
 calib:
     name: wikitext2
     download: False
@@ -25,6 +36,20 @@ eval:
     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
     bs: 1
     inference_per_block: False
+# eval:
+#     eval_pos: [pretrain, transformed, fake_quant]
+#     name: custom_mm
+#     download: False
+#     path: /code/lim42@xiaopeng.com/llmc_test/v3_calib_data/
+#     seq_len: 2048
+#     # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+#     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+#     apply_chat_template: True
+#     n_samples: 500
+#     bs: -1
+#     seq_len: 2048
+#     padding: True
+#     inference_per_block: False
 quant:
     method: GPTQ
     weight:

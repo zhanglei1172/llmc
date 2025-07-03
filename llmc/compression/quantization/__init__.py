@@ -18,4 +18,5 @@ from .smoothquant import SmoothQuant
 from .spinquant import SpinQuant
 from .spqr import SpQR
 from .train_utils import SGDG
+from .fsdp_trainer import FSDPTrainer
 from .tesseraq import TesseraQ

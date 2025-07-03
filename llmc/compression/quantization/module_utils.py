@@ -864,6 +864,105 @@ class FakeQuantLinear(nn.Module):
             f'online_rotate={self.buf_rotate})'
         )
 
+class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
+    def __init__(self, weight, bias, ori_module, w_qdq, a_qdq, w_rot, a_rot):
+        nn.Module.__init__(self)
+        self.register_buffer('weight', weight)
+        if bias is not None:
+            self.register_buffer('bias', bias)
+        else:
+            self.bias = None
+        self.a_qdq = a_qdq
+        self.w_qdq = w_qdq
+
+        for name, buf in ori_module.named_buffers():
+            if name.startswith('buf_'):
+                self.register_buffer(name, buf.data)
+        
+        if getattr(self, "buf_w_rotate", False):
+            self.w_rot = w_rot
+        if getattr(self, "buf_a_rotate", False):
+            self.a_rot = a_rot
+
+        if self.weight.data.dtype == torch.float8_e4m3fn:
+            self.fp8_forward = True
+            self.weight_scale_inv = ori_module.weight_scale_inv
+            self.block_size = ori_module.block_size
+        else:
+            self.fp8_forward = False
+
+        self.dynamic_quant_weight = False
+        self.dynamic_quant_tmp_weight = False
+
+    def forward(self, x):
+        if hasattr(self, "a_rot"):
+            x = self.a_rot(x, self)
+
+        if self.a_qdq is not None:
+            x = self.a_qdq(x, self)
+
+        if hasattr(self, "w_rot") and self.w_rot is not None:
+            tmp_weight, tmp_bias = self._rotate_weight()
+            self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+            self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+            # if self.w_qdq is not None:
+            self.tmp_weight = self.w_qdq(self)
+
+        else:
+            if not hasattr(self, "tmp_weight"):
+                tmp_weight = self.w_qdq(self)
+                self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+                self.tmp_bias = self.bias
+
+            elif self.dynamic_quant_weight:
+                # if self.w_qdq is not None:
+                self.tmp_weight = self.w_qdq(self)
+                self.tmp_bias = self.bias
+
+            elif self.dynamic_quant_tmp_weight:
+                # if self.w_qdq is not None:
+                self.tmp_weight = self.w_qdq(self)
+
+        if self.fp8_forward:
+            y = block_wise_fp8_forward_func(
+                x, self.tmp_weight, self.weight_scale_inv, self.block_size, self.bias
+            )
+        else:
+            y = torch.functional.F.linear(x, self.tmp_weight, self.tmp_bias)
+        return y
+    
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_qdq, a_qdq):
+        if not isinstance(module, RotateLinear2):
+            return module
+        weight = module.weight.data
+        if hasattr(module, 'bias') and module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(weight, bias, ori_module=module, w_qdq=w_qdq, a_qdq=a_qdq, w_rot=module.w_rot, a_rot=module.a_rot)
+
+        new_module.in_features = module.in_features
+        new_module.out_features = module.out_features
+        new_module.w_qdq_name = cls.get_func_name(w_qdq)
+        new_module.a_qdq_name = (
+            cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
+        )
+        return new_module
+
+
+    def __repr__(self):
+        return (
+            f"RotateFakeQuantLinear(in_features={self.in_features},"
+            f"out_features={self.out_features}, bias={self.bias is not None},"
+            f"weight_quant={self.w_qdq_name}, "
+            f"act_quant={self.a_qdq_name}, "
+            f"w_rotate={self.buf_w_rotate}, "
+            f"a_rotate={self.buf_a_rotate},"
+        )
 
 class EffcientFakeQuantLinear(nn.Module):
     def __init__(self, weight, bias, ori_module, a_qdq):
@@ -1308,6 +1407,7 @@ _LLMC_LINEAR_TYPES_ = [
     RotateLinear,
     RotateLinear2,
     FakeQuantLinear,
+    RotateFakeQuantLinear,
     EffcientFakeQuantLinear,
     VllmRealQuantLinear,
     SglRealQuantLinear,
