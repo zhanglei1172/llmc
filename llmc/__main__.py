@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import copy
 
 import torch
 import torch.distributed as dist
@@ -11,12 +12,14 @@ import yaml
 from easydict import EasyDict
 from loguru import logger
 from torch.distributed import destroy_process_group, init_process_group
-
+from transformers import (LlamaTokenizerFast, Trainer, TrainingArguments,
+                          default_data_collator, AutoTokenizer)
 from llmc.compression.quantization import *
 from llmc.compression.sparsification import *
 from llmc.compression.token_reduction import *
-from llmc.data import BaseDataset
+from llmc.data import BaseDataset, BaseTokenizer, TrainJsonDataset
 from llmc.eval.utils import eval_model, get_eval_list
+from llmc.eval import PerplexityEval
 from llmc.models import *
 from llmc.utils import (check_config, deploy_all_modality, get_modality,
                         mkdirs, print_important_package_version, seed_all,
@@ -25,6 +28,7 @@ from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
 
 
 def main(config):
+    tokenizer = BaseTokenizer(config.model.path, config.model.tokenizer_mode)
     model = MODEL_REGISTRY[config.model.type](config)
 
     logger.info(f'model: {model}')
@@ -68,6 +72,75 @@ def main(config):
             blockwise_opt.run_block_loop()
             blockwise_opts.append(blockwise_opt)
             dist.barrier()
+    if 'train' in config:
+        ignored_modules = []
+        for blockwise_opt in blockwise_opts:
+            blockwise_opt.deploy('train_rotate_quant')
+            ignored_modules.extend(blockwise_opt.get_ignored_modules())
+
+        dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
+
+        train_tokenizer = AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path=config.model.path,
+            cache_dir=config.train.data.cache_dir,
+            model_max_length=config.train.data.seq_len,
+            padding_side='right',
+            use_fast=True,
+            add_eos_token=False,
+            add_bos_token=False,
+        )
+
+
+        # if 'eval' in config and len(config.eval.eval_pos):
+        #     eval_list = []
+        #     name_list = (
+        #         config.eval.name
+        #         if not isinstance(config.eval.name, str)
+        #         else [config.eval.name]
+        #     )
+        #     for name in name_list:
+        #         eval_config = copy.deepcopy(config.eval)
+        #         eval_config.name = name
+        #         if len(name_list) != 1:  # eval multi datasets
+        #             eval_config.path = os.path.join(config.eval.path, name)
+        #         ppl_eval = PerplexityEval(blockwise_opt.model, eval_config)
+        #         eval_list.append(ppl_eval)
+
+        train_data = TrainJsonDataset(
+            dataset.calib_dataset,
+            train_tokenizer,
+            block_size=config.train.data.seq_len,
+        )
+
+        train_args = TrainingArguments(**config.train.train_args)
+        trainable_parameters = blockwise_opt.get_trainable_params()
+        blockwise_opt.model.model.seqlen = config.train.data.seq_len
+        optimizer = SGDG(trainable_parameters, lr=config.train.train_args.learning_rate, stiefel=True)
+        FSDPTrainer._optimizer = optimizer
+        trainer = FSDPTrainer(
+            model=blockwise_opt.model.model,
+            tokenizer=train_tokenizer,
+            args=train_args,
+            train_dataset=train_data,
+            eval_dataset=None,
+            data_collator=default_data_collator,
+            # optimizers=(optimizer, None),
+            optimizers=(None, None),
+            ignored_modules=ignored_modules,
+        )
+
+        trainer.train()
+        dist.barrier()
+
+        logger.info('End training')
+        
+        # clear cuda memory
+        del train_data
+        del train_tokenizer, optimizer
+        blockwise_opt.model.model.to('cpu')
+        gc.collect()
+        torch.cuda.empty_cache()
+
 
     eval_model(model, blockwise_opts, eval_list, eval_pos='transformed')
     if int(os.environ['RANK']) == 0:
