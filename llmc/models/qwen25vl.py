@@ -194,6 +194,7 @@ class Qwen25VL(Qwen25):
                 self.module = module
                 self.mlp = self.module.mlp
                 self.signature = inspect.signature(module.forward)
+                self.attention_type = module.attention_type if hasattr(module, 'attention_type') else None
 
             def forward(self, *args, **kwargs):
                 params = list(self.signature.parameters.keys())
