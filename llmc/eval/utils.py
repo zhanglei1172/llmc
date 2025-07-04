@@ -74,12 +74,14 @@ def get_eval_list(model, config):
 
 
 def eval_model(model, blockwise_opts, eval_list, eval_pos):
+    ret = None
     if int(os.environ['RANK']) == 0:
         do_eval = False
         for _, config_for_eval in eval_list:
             if eval_pos in config_for_eval.eval.eval_pos:
                 do_eval = True
         if do_eval:
+            ret = {eval_pos: {}}
             if eval_pos == 'transformed':
                 deploy_all_modality(blockwise_opts, 'origin_float')
             elif eval_pos in ['fake_quant', 'fake_quant_wo_kv']:
@@ -90,3 +92,5 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                     eval_name = config_for_eval.eval.type
                     dataset_name = config_for_eval.eval.name
                     logger.info(f'EVAL: {eval_name} on {dataset_name} is {res}')
+                    ret[eval_pos][dataset_name] = res
+    return ret

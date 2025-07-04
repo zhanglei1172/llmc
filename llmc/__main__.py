@@ -28,6 +28,7 @@ from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
 
 
 def main(config):
+    eval_ress = {}
     tokenizer = BaseTokenizer(config.model.path, config.model.tokenizer_mode)
     model = MODEL_REGISTRY[config.model.type](config)
 
@@ -35,7 +36,9 @@ def main(config):
     logger.info(f'tokenizer: {model.get_tokenizer()}')
 
     eval_list = get_eval_list(model, config)
-    eval_model(model, None, eval_list, eval_pos='pretrain')
+    eval_res = eval_model(model, None, eval_list, eval_pos='pretrain')
+    if eval_res is not None:
+        eval_ress.update(eval_res)
 
     blockwise_opts = []
     modalities, modality_configs = get_modality(config)
@@ -142,7 +145,9 @@ def main(config):
         torch.cuda.empty_cache()
 
 
-    eval_model(model, blockwise_opts, eval_list, eval_pos='transformed')
+    eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='transformed')
+    if eval_res is not None:
+        eval_ress.update(eval_res)
     if int(os.environ['RANK']) == 0:
         if 'save' in config and config.save.get('save_trans', False):
             blockwise_opt.save_model(save_trans_path)
@@ -157,8 +162,12 @@ def main(config):
                 config.save.get('trtllm_cfg'),
             )
 
-        eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant')
-        eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant_wo_kv')
+        eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant')
+        if eval_res is not None:
+            eval_ress.update(eval_res)
+        eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant_wo_kv')
+        if eval_res is not None:
+            eval_ress.update(eval_res)
 
         if 'save' in config and config.save.get('save_fake', False):
             deploy_all_modality(blockwise_opts, 'fake_quant')
@@ -246,6 +255,8 @@ def main(config):
             logger.info(f'opencompass_cmd : {opencompass_cmd}')
             os.system(opencompass_cmd)
     dist.barrier()
+    if int(os.environ['RANK']) == 0:
+        print(json.dumps(eval_ress, ensure_ascii=False, indent=4))
 
 
 if __name__ == '__main__':
