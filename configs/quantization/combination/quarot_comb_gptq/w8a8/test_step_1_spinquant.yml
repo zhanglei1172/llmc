@@ -63,5 +63,5 @@ train:
 save:
     # Save the Spinquant-transformed model.
     save_trans: True
-    save_fake: False
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant2
+    save_fake: True
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant3

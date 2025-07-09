@@ -37,8 +37,8 @@ class SpinQuant(BaseBlockwiseQuantization):
         for m in self.model.model.parameters():
             m.requires_grad = False
 
-        # if self.config["model"]["type"] in ["Opt"]:
-        self.remove_mean_from_embed()
+        if self.config['model']['type'] not in ['Qwen25VL']:
+            self.remove_mean_from_embed()
 
         Q1 = self.get_orthogonal_matrix(self.hidden_size)
         self.model.model.Q1 = RotateModule(Q1)

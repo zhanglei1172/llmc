@@ -3,7 +3,7 @@ base:
 model:
     type: Qwen25VL
     # Load Quarot-transformed model
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot3/transformed_model
+    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant3/transformed_model
     # path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant/transformed_model
     torch_dtype: auto
 calib:
@@ -50,6 +50,6 @@ quant:
     quant_out: True
 save:
     save_trans: True
-    save_fake: False
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
-    # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant_gptq
+    save_fake: True
+    # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant_gptq3
