@@ -15,8 +15,12 @@ from torch.nn import functional as F
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from llmc.compression.quantization.module_utils import (
-    _LLMC_LINEAR_TYPES_, _LLMC_LN_TYPES_, _TRANSFORMERS_LINEAR_TYPES_,
-    _TRANSFORMERS_LN_TYPES_, LlmcFp8Linear)
+    _LLMC_LINEAR_TYPES_,
+    _LLMC_LN_TYPES_,
+    _TRANSFORMERS_LINEAR_TYPES_,
+    _TRANSFORMERS_LN_TYPES_,
+    LlmcFp8Linear,
+)
 
 
 class BaseModel(metaclass=ABCMeta):

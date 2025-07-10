@@ -1,6 +1,7 @@
 import json
 import os
 from abc import ABCMeta
+import random
 
 import torch
 from datasets import load_dataset, load_from_disk
@@ -130,7 +131,9 @@ class BaseDataset(metaclass=ABCMeta):
                 self.calib_dataset_name == 'custom_txt'
                 or self.calib_dataset_name == 'custom_mm'
             )
-            calib_model_inputs = self.get_batch_process(samples)
+            calib_model_inputs = self.get_batch_process(
+                samples if self.n_samples == -1 else random.choices(samples, k=self.n_samples)
+            )
         return calib_model_inputs
 
     def get_batch_process(self, samples):
@@ -184,9 +187,16 @@ class BaseDataset(metaclass=ABCMeta):
         return calib_model_inputs, padding_mask
 
     def get_custom_dataset(self, custom_dataset_path):
-        audio_img_qa_json = os.path.join(custom_dataset_path, 'samples.json')
-        fp = open(audio_img_qa_json)
-        custom_data_samples = json.load(fp)
+        custom_data_samples = []
+        # audio_img_qa_json = os.path.join(custom_dataset_path, 'samples.json')
+        if os.path.isdir(custom_dataset_path):
+            audio_img_qa_jsons = [os.path.join(custom_dataset_path, x) for x in os.listdir(custom_dataset_path)]
+        else:
+            audio_img_qa_jsons = [custom_dataset_path]
+        for audio_img_qa_json in audio_img_qa_jsons:
+            if audio_img_qa_json.endswith('.json'):
+                with open(audio_img_qa_json) as fp:
+                    custom_data_samples.extend(json.load(fp))
         for idx in range(len(custom_data_samples)):
             if 'audio' in custom_data_samples[idx]:
                 if isinstance(custom_data_samples[idx]['audio'], list):
@@ -206,7 +216,7 @@ class BaseDataset(metaclass=ABCMeta):
                         custom_data_samples[idx]['image'][img_idx] = os.path.join(
                             custom_dataset_path, custom_data_samples[idx]['image'][img_idx]
                         )
-                else:
+                elif not custom_data_samples[idx]['image'].startswith('data:image;base64,'):
                     # custom_data_samples[idx]['image'] = os.path.join(
                     #     custom_dataset_path, custom_data_samples[idx]['image']
                     # )
@@ -223,6 +233,8 @@ class BaseDataset(metaclass=ABCMeta):
                     custom_data_samples[idx]['answer'] = custom_data_samples[idx]['label']
                 else:
                     custom_data_samples[idx]['answer'] = ''
+            if isinstance(custom_data_samples[idx]['answer'], dict):
+                custom_data_samples[idx]['answer'] = json.dumps(custom_data_samples[idx]['answer'],ensure_ascii=False)
             if 'prompt' not in custom_data_samples[idx]:
                 custom_data_samples[idx]['prompt'] = ''
             if 'negative_prompt' not in custom_data_samples[idx]:

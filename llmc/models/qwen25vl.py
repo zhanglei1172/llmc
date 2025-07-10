@@ -24,6 +24,7 @@ except Exception:
     )
 
 from llmc.utils.registry_factory import MODEL_REGISTRY
+from llmc.utils import resize_image
 
 from .qwen25 import Qwen25
 
@@ -57,20 +58,24 @@ class Qwen25VL(Qwen25):
         self.model = self.vlm_model
         self.model_config = self.vlm_model_config
 
-        self.min_pixels = 256 * 28 * 28
-        self.max_pixels = 1280 * 28 * 28
-        logger.warning(f'min_pixels is set to: {self.min_pixels}')
-        logger.warning(f'max_pixels is set to: {self.max_pixels}')
+        # self.min_pixels = 256 * 28 * 28
+        # self.max_pixels = 1280 * 28 * 28
+        # logger.warning(f'min_pixels is set to: {self.min_pixels}')
+        # logger.warning(f'max_pixels is set to: {self.max_pixels}')
         logger.warning('You can refer to the link https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct '
                        'to get more info of image resolution for performance boost.')
         self.processor = AutoProcessor.from_pretrained(
             self.model_path,
-            min_pixels=self.min_pixels,
-            max_pixels=self.max_pixels
         )
+        self.processor.tokenizer.padding_side = 'left'
 
     def get_extra_rot_module_besides_embed_layers(self):
         return [self.vision_projector.mlp[-1]]
+
+    def build_tokenizer(self):
+        super().build_tokenizer()
+        if self.tokenizer is not None:
+            self.tokenizer.padding_side = 'left'
 
     def batch_process(self, img_qas, calib_or_eval='eval', apply_chat_template=True, return_inputs=True): # noqa
         assert calib_or_eval == 'calib' or calib_or_eval == 'eval'
@@ -84,7 +89,7 @@ class Qwen25VL(Qwen25):
                 if not isinstance(img_path, list):
                     img_path = [img_path]
                 for img_idx in range(len(img_path)):
-                    content.append({'type': 'image', 'image': img_path[img_idx]})
+                    content.append({'type': 'image', 'image': resize_image(img_path[img_idx], 560, 560)})
                 content.append({'type': 'text', 'text': img_qas[idx]['question']})
                 message = [
                     {
@@ -121,7 +126,8 @@ class Qwen25VL(Qwen25):
             text=texts,
             images=image_inputs,
             videos=video_inputs,
-            padding=True,
+            padding="max_length" if self.config.get(calib_or_eval, {}).get('padding', True) else False,
+            max_length=self.config.get(calib_or_eval, {}).get('seq_len', None),
             return_tensors='pt',
         ).to(next(self.vlm_model.parameters()).dtype)
         return inputs

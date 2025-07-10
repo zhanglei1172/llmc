@@ -25,6 +25,7 @@ from .qwen2 import Qwen2
 from .qwen25 import Qwen25
 from .qwen2audio import Qwen2Audio
 from .qwen2moe import Qwen2Moe
+from .qwen3moe import Qwen3Moe
 from .qwen2vl import Qwen2VL
 from .qwen25vl import Qwen25VL
 from .smollm import SmolLM

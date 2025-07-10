@@ -1,3 +1,7 @@
+import base64
+import io
+from io import BytesIO
+from PIL import Image
 import os
 import random
 import shutil
@@ -95,3 +99,62 @@ def get_modality(config):
 def deploy_all_modality(blockwise_opts, quant_format):
     for blockwise_opt in blockwise_opts:
         blockwise_opt.deploy(quant_format)
+
+def resize_image(input_base64, width, height, keep_aspect_ratio=True):
+    """
+    对图片进行resize操作
+
+    :param input_base64: 输入图片的Base64字符串
+    :param width: 目标宽度
+    :param height: 目标高度
+    :param keep_aspect_ratio: 是否保持图片原比例，默认为False
+    :return: 调整大小后的图片的Base64字符串
+    """
+    try:
+        post_processed = False
+        if input_base64.startswith('data:image;base64,'):
+            post_processed = True
+            # 如果Base64字符串包含前缀，去掉前缀
+            input_base64 = input_base64.split('base64,')[-1]
+        # 将Base64字符串解码为字节数据
+        image_data = base64.b64decode(input_base64)
+        # 使用字节数据打开图片
+        image = Image.open(io.BytesIO(image_data))
+
+        # 如果图像模式为RGBA，转换为RGB
+        if image.mode == 'RGBA':
+            image = image.convert('RGB')
+
+        if keep_aspect_ratio:
+            # 计算缩放比例
+            ratio = min(width / image.width, height / image.height)
+            new_width = int(image.width * ratio)
+            new_height = int(image.height * ratio)
+            # 调整图片大小
+            resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+
+            # 创建一个新的空白图像，大小为目标尺寸
+            new_image = Image.new("RGB", (width, height))
+            # 计算粘贴位置，使图片居中
+            left = (width - new_width) // 2
+            top = (height - new_height) // 2
+            # top = 0
+            # 将调整大小后的图片粘贴到新图像的中心
+            new_image.paste(resized_image, (left, top))
+        else:
+            # 不保持原比例，直接调整图片大小
+            new_image = image.resize((width, height), Image.LANCZOS)
+
+        # 将调整后的图片保存为字节数据
+        buffer = io.BytesIO()
+        new_image.save(buffer, format="JPEG")
+        buffer.seek(0)
+        # 将字节数据编码为Base64字符串
+        output_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        if post_processed:
+            output_base64 = 'data:image;base64,' + output_base64
+
+        return output_base64
+    except Exception as e:
+        print(f"处理图片时出现错误: {e}")
+        return None
