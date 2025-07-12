@@ -57,27 +57,29 @@ class FSDPTrainer(Trainer):
         )
         if hasattr(self.accelerator.state, 'fsdp_plugin') and self.accelerator.state.fsdp_plugin is not None:
             # Do not wrap rotation matrix
+            for ignored_module in ignored_modules:
+                ignored_module.to(torch.cuda.current_device())
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             # use_orig_params because part of the model is freezed
             self.accelerator.state.fsdp_plugin.use_orig_params = True
-        handler = DistributedDataParallelKwargs(find_unused_parameters=True)
-        handler_class_to_attr = {
-            DistributedDataParallelKwargs: "ddp_handler",
-            # GradScalerKwargs: "scaler_handler",
-            # InitProcessGroupKwargs: "init_handler",
-            # FP8RecipeKwargs: "fp8_recipe_handler",
-            # AutocastKwargs: "autocast_handler",
-            # ProfileKwargs: "profile_handler",
-            # AORecipeKwargs: "ao_recipe_handler",
-            # TERecipeKwargs: "te_recipe_handler",
-            # MSAMPRecipeKwargs: "msamp_recipe_handler",
-        }
-        handler_attr = handler_class_to_attr[handler.__class__]
-        setattr(self, handler_attr, handler)
+        # handler = DistributedDataParallelKwargs(find_unused_parameters=True)
+        # handler_class_to_attr = {
+        #     DistributedDataParallelKwargs: "ddp_handler",
+        #     # GradScalerKwargs: "scaler_handler",
+        #     # InitProcessGroupKwargs: "init_handler",
+        #     # FP8RecipeKwargs: "fp8_recipe_handler",
+        #     # AutocastKwargs: "autocast_handler",
+        #     # ProfileKwargs: "profile_handler",
+        #     # AORecipeKwargs: "ao_recipe_handler",
+        #     # TERecipeKwargs: "te_recipe_handler",
+        #     # MSAMPRecipeKwargs: "msamp_recipe_handler",
+        # }
+        # handler_attr = handler_class_to_attr[handler.__class__]
+        # setattr(self, handler_attr, handler)
         _old_prepare = Accelerator.prepare
         def _new_prepare(self, *args, **kwargs):
             rets = _old_prepare(self, *args, **kwargs)
-            for ret in rets:
+            for ret in (rets if isinstance(rets, (tuple, list)) else [rets]):
                 if isinstance(ret, nn.Module) and hasattr(ret, '_set_static_graph') and not ret.static_graph:
                     ret._set_static_graph()
             return rets
