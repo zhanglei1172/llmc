@@ -17,8 +17,20 @@ from transformers.trainer_callback import (
 from transformers.trainer_utils import (
     EvalPrediction,
 )
+from torch.distributed.fsdp import (
+    FullStateDictConfig,
+)
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as PT_FSDP,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from accelerate.utils import DistributedDataParallelKwargs
 from accelerate import Accelerator
+
+def pt_fsdp_state_dict(model: torch.nn.Module):
+    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
+    with PT_FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
+        return model.state_dict()
 
 class FSDPTrainer(Trainer):
     _optimizer = None
@@ -60,6 +72,8 @@ class FSDPTrainer(Trainer):
             for ignored_module in ignored_modules:
                 ignored_module.to(torch.cuda.current_device())
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
+            # self.accelerator.state.fsdp_plugin.fsdp_version = 2
+            # self.accelerator.state.fsdp_plugin.reshard_after_forward = True
             # use_orig_params because part of the model is freezed
             self.accelerator.state.fsdp_plugin.use_orig_params = True
         # handler = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -79,9 +93,9 @@ class FSDPTrainer(Trainer):
         _old_prepare = Accelerator.prepare
         def _new_prepare(self, *args, **kwargs):
             rets = _old_prepare(self, *args, **kwargs)
-            for ret in (rets if isinstance(rets, (tuple, list)) else [rets]):
-                if isinstance(ret, nn.Module) and hasattr(ret, '_set_static_graph') and not ret.static_graph:
-                    ret._set_static_graph()
+            # for ret in (rets if isinstance(rets, (tuple, list)) else [rets]):
+            #     if isinstance(ret, nn.Module) and hasattr(ret, '_set_static_graph') and not ret.static_graph:
+            #         ret._set_static_graph()
             return rets
         Accelerator.prepare = _new_prepare
             
@@ -101,3 +115,13 @@ class FSDPTrainer(Trainer):
             num_training_steps=num_training_steps,
             optimizer=self.optimizer,
         )
+
+    def get_trained_params(self):
+        """
+        Returns a copy of the model on CPU.
+        """
+        if self.is_fsdp_enabled:
+            state_dict = pt_fsdp_state_dict(self.model)
+            return state_dict
+        else:
+            return self.model.state_dict()

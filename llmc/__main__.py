@@ -76,10 +76,12 @@ def main(config):
             blockwise_opts.append(blockwise_opt)
             dist.barrier()
     if 'train' in config:
+        # backup model
+        llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
         ignored_modules = []
         for blockwise_opt in blockwise_opts:
             blockwise_opt.deploy('train_rotate_quant')
-            ignored_modules.extend(blockwise_opt.get_ignored_modules())
+            ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
 
         dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
 
@@ -116,12 +118,12 @@ def main(config):
         )
 
         train_args = TrainingArguments(**config.train.train_args)
-        trainable_parameters = blockwise_opt.get_trainable_params()
-        blockwise_opt.model.model.seqlen = config.train.data.seq_len
+        trainable_parameters = blockwise_opt.get_trainable_params(llmc_model_to_train)
+        llmc_model_to_train.model.seqlen = config.train.data.seq_len
         optimizer = SGDG(trainable_parameters, lr=config.train.train_args.learning_rate, stiefel=True)
         FSDPTrainer._optimizer = optimizer
         trainer = FSDPTrainer(
-            model=blockwise_opt.model.model,
+            model=llmc_model_to_train.model,
             tokenizer=train_tokenizer,
             args=train_args,
             train_dataset=train_data,
@@ -137,12 +139,21 @@ def main(config):
 
         logger.info('End training')
         
+
+        # blockwise_opt.model.model.to('cpu')
+        # blockwise_opt.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
+        state_dict = trainer.get_trained_params()
+        model_state = blockwise_opt.model.model.state_dict()
+        for name, param in model_state.items():
+            if name in state_dict:
+                # 保持原 device，只拷贝数据
+                param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
         # clear cuda memory
-        del train_data
-        del train_tokenizer, optimizer
-        blockwise_opt.model.model.to('cpu')
+        del train_data, ignored_modules, llmc_model_to_train, state_dict
+        del train_tokenizer, optimizer, trainer
         gc.collect()
         torch.cuda.empty_cache()
+        dist.barrier()
 
 
     eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='transformed')
@@ -254,9 +265,10 @@ def main(config):
             )
             logger.info(f'opencompass_cmd : {opencompass_cmd}')
             os.system(opencompass_cmd)
-    dist.barrier()
+    # dist.barrier()
     if int(os.environ['RANK']) == 0:
         print(json.dumps(eval_ress, ensure_ascii=False, indent=4))
+    dist.barrier()
 
 
 if __name__ == '__main__':

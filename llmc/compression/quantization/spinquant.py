@@ -61,9 +61,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def get_trainable_params(self):
+    def get_trainable_params(self, model=None):
         trainable_parameters = []
-        for n, m in self.model.model.named_parameters():
+        if model is None:
+            model = self.model
+        for n, m in model.model.named_parameters():
             if 'Q1' in n or 'Q2' in n:
                 trainable_parameters.append(m)
         return trainable_parameters
@@ -156,17 +158,20 @@ class SpinQuant(BaseBlockwiseQuantization):
 
     def apply_fc_rotate_weight(self):
         for idx, block in enumerate(self.blocks):
+            block.cuda()
             logger.info(f'Start apply {idx}-th block rotate weights')
             for name, module in block.named_modules():
                 if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
                     module.weight, module.bias = weight, bias
+            block.cpu()
             logger.info(f'End apply {idx}-th block rotate weights')
 
     def apply_embedding_rotate_weight(self):
         self.model.find_embed_layers()
         embedding_layer = self.model.get_embed_layers()[0]
         if isinstance(embedding_layer, RotateEmbedding):
+            embedding_layer.cuda()
             weight = embedding_layer._rotate_weight()
             embedding_layer.weight.data = weight
             embedding_layer_name = get_module_name(self.model.model, embedding_layer)
@@ -177,10 +182,12 @@ class SpinQuant(BaseBlockwiseQuantization):
                 None,
                 {}
             )
+            embedding_layer.cpu()
 
     def apply_lmhead_rotate_weight(self):
         lm_head_layer = self.model.get_head_layers()[0]
         if isinstance(lm_head_layer, RotateLinear2):
+            lm_head_layer.cuda()
             weight, bias = lm_head_layer._rotate_weight()
             lm_head_layer.weight, lm_head_layer.bias = weight, bias
             lm_head_layer_name = get_module_name(self.model.model, lm_head_layer)
@@ -191,6 +198,7 @@ class SpinQuant(BaseBlockwiseQuantization):
                 None,
                 {}
             )
+            lm_head_layer.cpu()
 
 
     def get_orthogonal_matrix(self, size):
@@ -245,9 +253,11 @@ class SpinQuant(BaseBlockwiseQuantization):
                 self.replace_rotate_fc(block, n, m, Q1=self.model.model.Q1, Q2=block.self_attn.Q2, transpose=True)
                 self.replace_rotate_fc(block, 'self_attn.v_proj', prev_op[0], Q1=self.model.model.Q1, Q2=block.self_attn.Q2, transpose=False)
 
-    def get_ignored_modules(self):
-        return [self.model.model.Q1] + [
-            block.self_attn.Q2 for block in self.model.get_blocks()
+    def get_ignored_modules(self, model=None):
+        if model is None:
+            model = self.model
+        return [model.model.Q1] + [
+            block.self_attn.Q2 for block in model.get_blocks()
         ]
 
     def apply_rotate_weight(self):
