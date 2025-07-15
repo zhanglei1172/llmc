@@ -867,9 +867,9 @@ class FakeQuantLinear(nn.Module):
 class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
     def __init__(self, weight, bias, ori_module, w_qdq, a_qdq, w_rot, a_rot):
         nn.Module.__init__(self)
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer('bias', bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
         self.a_qdq = a_qdq

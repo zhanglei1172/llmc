@@ -163,7 +163,9 @@ class SpinQuant(BaseBlockwiseQuantization):
             for name, module in block.named_modules():
                 if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
-                    module.weight, module.bias = weight, bias
+                    module.weight.copy_(weight)
+                    if bias is not None:
+                        module.bias.copy_(bias)
             block.cpu()
             logger.info(f'End apply {idx}-th block rotate weights')
 

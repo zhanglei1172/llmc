@@ -77,11 +77,14 @@ def main(config):
             dist.barrier()
     if 'train' in config:
         # backup model
-        llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
         ignored_modules = []
         for blockwise_opt in blockwise_opts:
             blockwise_opt.deploy('train_rotate_quant')
+            dist.barrier()
+        llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
+        for blockwise_opt in blockwise_opts:
             ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
+        llmc_model_to_train.model.config.use_cache = False
 
         dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
 
