@@ -37,7 +37,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         for m in self.model.model.parameters():
             m.requires_grad = False
 
-        if self.config['model']['type'] not in ['Qwen25VL']:
+        if not self.config['model']['type'].startswith('Qwen'):
             self.remove_mean_from_embed()
 
         Q1 = self.get_orthogonal_matrix(self.hidden_size)
@@ -76,14 +76,14 @@ class SpinQuant(BaseBlockwiseQuantization):
     def w_rot(self, module, w_rotater, args):
         return w_rotater.rotate(module.weight, module.bias, args['Q1'], args['Q2'], args['transpose'])
 
-    def w_qdq_tmp(self, module, wquantizer):
+    def w_qdq_tmp(self, module, weight, wquantizer):
         args = {'lowbound_factor': None, 'upbound_factor': None}
         if hasattr(module, 'buf_lowbound_factor'):
             args['lowbound_factor'] = module.buf_lowbound_factor
         if hasattr(module, 'buf_upbound_factor'):
             args['upbound_factor'] = module.buf_upbound_factor
 
-        return wquantizer.fake_quant_weight_dynamic(module.tmp_weight, args)
+        return wquantizer.fake_quant_weight_dynamic(weight, args)
 
     def register_embed_spin_parameters(self):
         embedding_layer = self.model.get_embed_layers()[0]

@@ -33,7 +33,7 @@ class Quarot(BaseBlockwiseQuantization):
             w = self.model.get_embed_layers()[0].weight.clone()
             self.model.get_head_layers()[0].weight = nn.Parameter(w)
 
-        if self.config['model']['type'] not in ['Qwen25VL', "Qwen3Moe"]:
+        if not self.config['model']['type'].startswith('Qwen'):
             self.remove_mean_from_embed()
 
         self.Q = self.get_orthogonal_matrix()

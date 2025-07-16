@@ -903,12 +903,15 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
 
         if hasattr(self, "w_rot") and self.w_rot is not None:
             tmp_weight, tmp_bias = self._rotate_weight()
-            self.register_buffer("tmp_weight", tmp_weight, persistent=False)
-            self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+            # friendly for FSDP:
+            # self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+            # self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+            # self.tmp_weight = tmp_weight
+            # self.tmp_bias = tmp_bias
             # if self.w_qdq is not None:
-            self.tmp_weight = self.w_qdq(self)
-
+            tmp_weight = self.w_qdq(self, tmp_weight)
         else:
+            raise NotImplementedError
             if not hasattr(self, "tmp_weight"):
                 tmp_weight = self.w_qdq(self)
                 self.register_buffer("tmp_weight", tmp_weight, persistent=False)
@@ -928,7 +931,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
                 x, self.tmp_weight, self.weight_scale_inv, self.block_size, self.bias
             )
         else:
-            y = torch.functional.F.linear(x, self.tmp_weight, self.tmp_bias)
+            y = torch.functional.F.linear(x, tmp_weight, tmp_bias)
         return y
     
 
