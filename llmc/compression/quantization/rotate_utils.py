@@ -10,7 +10,7 @@ from .constant import *
 class RotateModule(nn.Module):
     def __init__(self, Q_init):
         super(RotateModule, self).__init__()
-        self.weight = nn.Parameter(Q_init.to(torch.float32).to(torch.device('cuda')))
+        self.weight = nn.Parameter(Q_init.to(torch.float32).to(torch.device('cuda')), requires_grad=True)
 
     def forward(self, x, transpose=False):
         if transpose:

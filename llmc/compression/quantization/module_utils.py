@@ -159,8 +159,8 @@ class RotateEmbedding(nn.Module):
 class FakeAffineLayerNorm(nn.Module):
     def __init__(self, norm, shape):
         super().__init__()
-        self.register_parameter('weight', nn.Parameter(torch.ones(shape, dtype=torch.float)))
-        self.register_parameter('bias', nn.Parameter(torch.ones(shape, dtype=torch.float)))
+        self.register_parameter('weight', nn.Parameter(torch.ones(shape, dtype=torch.float), requires_grad=False))
+        self.register_parameter('bias', nn.Parameter(torch.ones(shape, dtype=torch.float), requires_grad=False))
         self.norm = norm
 
     def forward(self, x):
@@ -245,18 +245,18 @@ class LlmcFp8Linear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         if bias is not None:
-            self.bias = nn.Parameter(torch.empty(out_features))
+            self.bias = nn.Parameter(torch.empty(out_features), requires_grad=False)
         else:
             self.register_parameter('bias', None)
 
         # Init empty weight and scale
         self.weight = nn.Parameter(
-            torch.empty(out_features, in_features, dtype=torch.float8_e4m3fn)
+            torch.empty(out_features, in_features, dtype=torch.float8_e4m3fn), requires_grad=False
         )
         scale_out_features = (out_features + block_size - 1) // block_size
         scale_in_features = (in_features + block_size - 1) // block_size
         self.weight_scale_inv = nn.Parameter(
-            torch.empty(scale_out_features, scale_in_features, dtype=torch.float32)
+            torch.empty(scale_out_features, scale_in_features, dtype=torch.float32), requires_grad=False
         )
 
     def forward(self, x):
@@ -347,9 +347,9 @@ class RectifiedSigmoid(nn.Module):
 class LlmcLayerNorm(nn.Module):
     def __init__(self, weight, bias, eps, normalized_shape, elementwise_affine):
         super().__init__()
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer('bias', bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
         self.eps = eps
@@ -395,7 +395,7 @@ class LlmcLayerNorm(nn.Module):
 class LlmcLlamaRMSNorm(nn.Module):
     def __init__(self, weight, eps=1e-6):
         super().__init__()
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         self.bias = None
         self.variance_epsilon = eps
         self.use_tmp_parameter = False
@@ -433,7 +433,7 @@ class LlmcRMSNorm(nn.Module):
     def __init__(self, weight, eps=1e-6):
         super().__init__()
         self.variance_epsilon = eps
-        self.weight = nn.Parameter(torch.ones_like(weight))
+        self.weight = nn.Parameter(torch.ones_like(weight), requires_grad=False)
 
     def forward(self, hidden_states):
         input_dtype = hidden_states.dtype
@@ -508,9 +508,9 @@ class LlmcMiniCPMRMSNorm(LlmcLlamaRMSNorm):
 class OriginFloatLinear(nn.Module):
     def __init__(self, weight, bias, ori_module):
         super().__init__()
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer('bias', bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
 
@@ -618,9 +618,9 @@ class Rotater:
 class RotateLinear2(nn.Module):
     def __init__(self, weight, bias, ori_module, w_rot, a_rot):
         super().__init__()
-        self.register_buffer("weight", weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer("bias", bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
 
@@ -640,12 +640,14 @@ class RotateLinear2(nn.Module):
             x = self.a_rot(x, self)
 
         if self.buf_w_rotate:
-            tmp_weight, tmp_bias = self._rotate_weight()
-            self.register_buffer("tmp_weight", tmp_weight, persistent=False)
-            self.register_buffer("tmp_bias", tmp_bias, persistent=False)
-
-        weight = getattr(self, "tmp_weight", self.weight)
-        bias = getattr(self, "tmp_bias", self.bias)
+            weight, bias = self._rotate_weight()
+            # self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+            # self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+        else:
+            weight = self.weight
+            bias = self.bias
+        # weight = getattr(self, "tmp_weight", self.weight)
+        # bias = getattr(self, "tmp_bias", self.bias)
         x = torch.functional.F.linear(x, weight, bias)
         return x
     
@@ -704,9 +706,9 @@ class RotateLinear(nn.Module):
         had_dim,
     ):
         super().__init__()
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer('bias', bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
 
@@ -773,9 +775,9 @@ class RotateLinear(nn.Module):
 class FakeQuantLinear(nn.Module):
     def __init__(self, weight, bias, ori_module, w_qdq, a_qdq):
         super().__init__()
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer('bias', bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
         self.a_qdq = a_qdq
@@ -970,9 +972,9 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
 class EffcientFakeQuantLinear(nn.Module):
     def __init__(self, weight, bias, ori_module, a_qdq):
         super().__init__()
-        self.register_buffer('weight', weight)
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
-            self.register_buffer('bias', bias)
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
         else:
             self.bias = None
         self.a_qdq = a_qdq
@@ -1052,10 +1054,10 @@ class VllmRealQuantLinear(nn.Module):
     def __init__(self, weight, bias, scales, input_scale, need_pack, scales_name):
         super().__init__()
         weight_name = 'weight_packed' if need_pack else 'weight'
-        self.register_buffer(weight_name, weight)
+        self.register_buffer(weight_name, weight.data)
 
         (
-            self.register_buffer('bias', bias)
+            self.register_buffer('bias', bias.data)
             if bias is not None
             else setattr(self, 'bias', None)
         )
@@ -1225,10 +1227,10 @@ class SglRealQuantLinear(VllmRealQuantLinear):
 class AutoawqRealQuantLinear(nn.Module):
     def __init__(self, weight, bias, scales, zeros):
         super().__init__()
-        self.register_buffer('qweight', weight)
+        self.register_buffer('qweight', weight.data)
 
         (
-            self.register_buffer('bias', bias)
+            self.register_buffer('bias', bias.data)
             if bias is not None
             else setattr(self, 'bias', None)
         )

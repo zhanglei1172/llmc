@@ -23,7 +23,7 @@ class Gemma2(BaseModel):
             if isinstance(m, Gemma2RMSNorm):
                 w = m.weight.data
                 del m.weight
-                m.weight = nn.Parameter(w + 1.0)
+                m.weight = nn.Parameter(w + 1.0, requires_grad=False)
                 m.forward = MethodType(gemma2_rms_norm_forward, m)
 
     def find_blocks(self):

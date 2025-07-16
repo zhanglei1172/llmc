@@ -31,7 +31,7 @@ class Quarot(BaseBlockwiseQuantization):
             logger.info('Tie weight! Copy embed_layer for head_layer!')
             del self.model.get_head_layers()[0].weight
             w = self.model.get_embed_layers()[0].weight.clone()
-            self.model.get_head_layers()[0].weight = nn.Parameter(w)
+            self.model.get_head_layers()[0].weight = nn.Parameter(w, requires_grad=False)
 
         if not self.config['model']['type'].startswith('Qwen'):
             self.remove_mean_from_embed()

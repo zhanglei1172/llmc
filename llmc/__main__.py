@@ -306,6 +306,7 @@ if __name__ == '__main__':
     # Ensure only the main process creates directories
     if int(os.environ['RANK']) == 0:
         if 'save' in config:
+            mkdirs(config.save.save_path)
             if config.save.get('save_trans', False):
                 save_trans_path = os.path.join(
                     config.save.save_path, 'transformed_model'

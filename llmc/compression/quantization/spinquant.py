@@ -163,9 +163,9 @@ class SpinQuant(BaseBlockwiseQuantization):
             for name, module in block.named_modules():
                 if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
-                    module.weight.copy_(weight)
+                    module.weight.data = weight
                     if bias is not None:
-                        module.bias.copy_(bias)
+                        module.bias.data = bias
             block.cpu()
             logger.info(f'End apply {idx}-th block rotate weights')
 
@@ -191,7 +191,10 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(lm_head_layer, RotateLinear2):
             lm_head_layer.cuda()
             weight, bias = lm_head_layer._rotate_weight()
-            lm_head_layer.weight, lm_head_layer.bias = weight, bias
+            lm_head_layer.weight.data = weight
+            if bias is not None:
+                lm_head_layer.bias.data = bias
+            # lm_head_layer.weight, lm_head_layer.bias = weight, bias
             lm_head_layer_name = get_module_name(self.model.model, lm_head_layer)
             self.model.replace_module_subset(
                 OriginFloatLinear,
@@ -271,7 +274,10 @@ class SpinQuant(BaseBlockwiseQuantization):
                 module = self.model.model.get_submodule(module_name)
                 if isinstance(module, (RotateLinear2, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
-                    module.weight, module.bias = weight, bias
+                    module.weight.data = weight
+                    if bias is not None:
+                        module.bias.data = bias
+                    # module.weight, module.bias = weight, bias
                 self.model.replace_module_subset(
                     OriginFloatLinear,
                     self.model.model,
@@ -303,6 +309,13 @@ class SpinQuant(BaseBlockwiseQuantization):
             logger.info(f'-- strat train rotation--')
         else:
             with torch.no_grad():
+                if quant_format == 'origin_float' and 'save' in self.config and self.config.save.get('save_rotate_weight', False):
+                    # save rotate weight state_dict
+                    state_dict = {}
+                    for name, param in self.model.model.state_dict().items():
+                        if 'Q1' in name or 'Q2' in name:
+                            state_dict[name] = param
+                    torch.save(state_dict, os.path.join(self.config.save.save_path,'rotate_weight.pth'))
                 self.apply_rotate_weight()
                 super().deploy(quant_format)
 
