@@ -81,79 +81,77 @@ def main(config):
         for blockwise_opt in blockwise_opts:
             blockwise_opt.deploy('train_rotate_quant')
             dist.barrier()
-        llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
-        for blockwise_opt in blockwise_opts:
+        def train(blockwise_opt):
+            llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
             ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
-        llmc_model_to_train.model.config.use_cache = False
+            llmc_model_to_train.model.config.use_cache = False
 
-        dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
+            dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
 
-        train_tokenizer = AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path=config.model.path,
-            cache_dir=config.train.data.cache_dir,
-            model_max_length=config.train.data.seq_len,
-            padding_side='right',
-            use_fast=True,
-            add_eos_token=False,
-            add_bos_token=False,
-        )
+            train_tokenizer = AutoTokenizer.from_pretrained(
+                pretrained_model_name_or_path=config.model.path,
+                cache_dir=config.train.data.cache_dir,
+                model_max_length=config.train.data.seq_len,
+                padding_side='right',
+                use_fast=True,
+                add_eos_token=False,
+                add_bos_token=False,
+            )
 
 
-        # if 'eval' in config and len(config.eval.eval_pos):
-        #     eval_list = []
-        #     name_list = (
-        #         config.eval.name
-        #         if not isinstance(config.eval.name, str)
-        #         else [config.eval.name]
-        #     )
-        #     for name in name_list:
-        #         eval_config = copy.deepcopy(config.eval)
-        #         eval_config.name = name
-        #         if len(name_list) != 1:  # eval multi datasets
-        #             eval_config.path = os.path.join(config.eval.path, name)
-        #         ppl_eval = PerplexityEval(blockwise_opt.model, eval_config)
-        #         eval_list.append(ppl_eval)
+            # if 'eval' in config and len(config.eval.eval_pos):
+            #     eval_list = []
+            #     name_list = (
+            #         config.eval.name
+            #         if not isinstance(config.eval.name, str)
+            #         else [config.eval.name]
+            #     )
+            #     for name in name_list:
+            #         eval_config = copy.deepcopy(config.eval)
+            #         eval_config.name = name
+            #         if len(name_list) != 1:  # eval multi datasets
+            #             eval_config.path = os.path.join(config.eval.path, name)
+            #         ppl_eval = PerplexityEval(blockwise_opt.model, eval_config)
+            #         eval_list.append(ppl_eval)
 
-        train_data = TrainJsonDataset(
-            dataset.calib_dataset,
-            train_tokenizer,
-            block_size=config.train.data.seq_len,
-        )
+            train_data = TrainJsonDataset(
+                dataset.calib_dataset,
+                train_tokenizer,
+                block_size=config.train.data.seq_len,
+            )
 
-        train_args = TrainingArguments(**config.train.train_args)
-        trainable_parameters = blockwise_opt.get_trainable_params(llmc_model_to_train)
-        llmc_model_to_train.model.seqlen = config.train.data.seq_len
-        optimizer = SGDG(trainable_parameters, lr=config.train.train_args.learning_rate, stiefel=True)
-        FSDPTrainer._optimizer = optimizer
-        trainer = FSDPTrainer(
-            model=llmc_model_to_train.model,
-            tokenizer=train_tokenizer,
-            args=train_args,
-            train_dataset=train_data,
-            eval_dataset=None,
-            data_collator=default_data_collator,
-            # optimizers=(optimizer, None),
-            optimizers=(None, None),
-            ignored_modules=ignored_modules,
-        )
+            train_args = TrainingArguments(**config.train.train_args)
+            trainable_parameters = blockwise_opt.get_trainable_params(llmc_model_to_train)
+            llmc_model_to_train.model.seqlen = config.train.data.seq_len
+            optimizer = SGDG(trainable_parameters, lr=config.train.train_args.learning_rate, stiefel=True)
+            FSDPTrainer._optimizer = optimizer
+            trainer = FSDPTrainer(
+                model=llmc_model_to_train.model,
+                tokenizer=train_tokenizer,
+                args=train_args,
+                train_dataset=train_data,
+                eval_dataset=None,
+                data_collator=default_data_collator,
+                # optimizers=(optimizer, None),
+                optimizers=(None, None),
+                ignored_modules=ignored_modules,
+            )
 
-        trainer.train()
-        dist.barrier()
+            trainer.train()
+            dist.barrier()
 
-        logger.info('End training')
-        
+            logger.info('End training')
+            
 
-        # blockwise_opt.model.model.to('cpu')
-        # blockwise_opt.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
-        state_dict = trainer.get_trained_params()
-        model_state = blockwise_opt.model.model.state_dict()
-        for name, param in model_state.items():
-            if name in state_dict:
-                # 保持原 device，只拷贝数据
-                param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
-        # clear cuda memory
-        del train_data, ignored_modules, llmc_model_to_train, state_dict
-        del train_tokenizer, optimizer, trainer
+            # blockwise_opt.model.model.to('cpu')
+            # blockwise_opt.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
+            state_dict = trainer.get_trained_params()
+            model_state = blockwise_opt.model.model.state_dict()
+            for name, param in model_state.items():
+                if name in state_dict:
+                    # 保持原 device，只拷贝数据
+                    param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
+        train(blockwise_opts[0])
         gc.collect()
         torch.cuda.empty_cache()
         dist.barrier()

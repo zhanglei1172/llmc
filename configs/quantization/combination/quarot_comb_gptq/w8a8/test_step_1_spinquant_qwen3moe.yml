@@ -13,8 +13,8 @@ eval:
     seq_len: 2048
     # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
-    bs: 1
-    inference_per_block: False
+    bs: 20
+    inference_per_block: True
 quant:
     method: SpinQuant
     weight:
@@ -49,26 +49,29 @@ train:
         fp16: False
         bf16: False
         log_on_each_node: False
-        per_device_train_batch_size: 1
+        per_device_train_batch_size: 4
         logging_steps: 1
-        learning_rate: 1.5
+        learning_rate: 1.
         weight_decay: 0.
         lr_scheduler_type: "cosine"
         gradient_checkpointing: True
         max_steps: 100
-        output_dir: ./out/
-        logging_dir: ./log/
+        output_dir: /tmp/out/
+        logging_dir: /tmp/log/
         logging_first_step: True
         report_to: 
         fsdp_transformer_layer_cls_to_wrap: "Qwen3MoeDecoderLayer"
-        fsdp: "full_shard auto_wrap offload"
+        fsdp: "full_shard auto_wrap"
         ddp_find_unused_parameters: True
         fsdp_config:
             # activation_checkpointing: True
             use_orig_params: True
+        # load_best_model_at_end: True
+        # save_total_limit: 1
   
 save:
     # Save the Spinquant-transformed model.
-    save_trans: True
-    save_fake: True
-    save_path: /workspace/gaoy25@xiaopeng.com/leizhang/out/out_qwen3moe_spinquant
+    save_rotate_weight: True
+    save_trans: False
+    save_fake: False
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen3moe_spinquant
