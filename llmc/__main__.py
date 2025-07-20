@@ -42,7 +42,7 @@ def main(config):
 
     blockwise_opts = []
     modalities, modality_configs = get_modality(config)
-
+    dist.barrier()
     for modality, modality_config in zip(modalities, modality_configs):
         model.set_modality(modality)
         if not config.get('calib', False):
