@@ -16,6 +16,7 @@ class SmoothQuant(BaseBlockwiseQuantization):
         super().__init__(model, quant_config, input, padding_mask, config)
         special_config = self.quant_config.get('special', {})
         self.alpha = special_config.get('alpha', 0.5)
+        self.selected_layers = special_config.get('selected_layers', None)
 
     @torch.no_grad()
     def filter_subset(self, prev_op):
@@ -69,6 +70,9 @@ class SmoothQuant(BaseBlockwiseQuantization):
         prev_op = subset['prev_op']
         input_name = subset['input'][0]
 
+        if self.selected_layers and input_name not in self.selected_layers:
+            logger.info(f'Skipping layer {input_name} as it is not in selected layers.')
+            return
         if not self.filter_subset(prev_op):
             logger.info('Do not transform this subset.')
             return

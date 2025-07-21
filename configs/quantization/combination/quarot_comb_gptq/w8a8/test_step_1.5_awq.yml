@@ -1,0 +1,47 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL
+    path: /workspace/gaoy25@xiaopeng.com/leizhang/out/out_qwen25vl_spinquant_gptq_fix/transformed_model/
+    torch_dtype: auto
+calib:
+    name: pileval
+    download: True
+    path: calib data path
+    n_samples: 128
+    bs: 1
+    seq_len: 512
+    preproc: pileval_awq
+    seed: *seed
+eval:
+    eval_pos: [pretrain, transformed, fake_quant]
+    name: wikitext2
+    download: False
+    path: /workspace/gaoy25@xiaopeng.com/leizhang/dataset/eval/wikitext2
+    seq_len: 2048
+    # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+    # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+    bs: 1
+    inference_per_block: False
+quant:
+    method: Awq
+    weight:
+        bit: 8
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_token
+    special:
+        trans: True
+        # The options for "trans_version" include "v1" and "v2".
+        trans_version: v2
+        weight_clip: True
+        clip_sym: True
+        selected_layers: ["mlp.down_proj"]
+save:
+    save_trans: True
+    save_fake: False
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant_awq

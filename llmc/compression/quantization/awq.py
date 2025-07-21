@@ -35,6 +35,7 @@ class Awq(BaseBlockwiseQuantization):
         self.save_scale = special_config.get('save_scale', False)
         self.awq_bs = special_config.get('awq_bs', None)
         self.save_mem = special_config.get('save_mem', True)
+        self.selected_layers = special_config.get('selected_layers', None)
 
     @torch.no_grad()
     def scaling_weight(self, w, scales, is_gqa):
@@ -322,6 +323,10 @@ class Awq(BaseBlockwiseQuantization):
 
         if len(prev_op) == 0 or (len(prev_op) == 1 and prev_op[0] is None):
             logger.info('Cannot apply scale. Do not transform this subset.')
+            return
+        
+        if self.selected_layers and input_name not in self.selected_layers:
+            logger.info(f'Skipping layer {input_name} as it is not in selected layers.')
             return
 
         if isinstance(
