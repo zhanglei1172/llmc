@@ -15,6 +15,7 @@ from .quarot import Quarot
 from .quik import QUIK
 from .rtn import RTN
 from .smoothquant import SmoothQuant
+from .smoothquant_custom import SmoothQuantCustom
 from .spinquant import SpinQuant
 from .spqr import SpQR
 from .train_utils import SGDG
