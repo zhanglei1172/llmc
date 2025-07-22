@@ -33,6 +33,9 @@ class SmoothQuantCustom(SmoothQuant):
         prev_op = subset['prev_op']
         input_name = subset['input'][0]
 
+        if self.selected_layers and input_name not in self.selected_layers:
+            logger.info(f'Skipping layer {input_name} as it is not in selected layers.')
+            return
         if not self.filter_subset(input_name):
             logger.info('Do not transform this subset.')
             return
