@@ -6,3 +6,4 @@ from .eval_token_consist import TokenConsistencyEval
 from .eval_kl import KLDivergenceEval
 from .eval_video_generate import VideoGenerateEval
 from .eval_vqa import VQAEval
+from .eval_mse import MSEEval

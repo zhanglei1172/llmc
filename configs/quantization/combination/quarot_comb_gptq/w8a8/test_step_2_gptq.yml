@@ -2,14 +2,13 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL
-    # Load Quarot-transformed model
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant3/transformed_model
-    # path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant/transformed_model
+    # Load spinquant-transformed model
+    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant/transformed_model
     torch_dtype: auto
 calib:
     name: wikitext2
     download: False
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset/calib/wikitext2
+    path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
     n_samples: 512
     bs: 1
     seq_len: 2048
@@ -19,7 +18,7 @@ eval:
     eval_pos: [pretrain, transformed, fake_quant]
     name: wikitext2
     download: False
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/dataset/eval/wikitext2
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
     seq_len: 2048
     # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
@@ -50,6 +49,6 @@ quant:
     quant_out: True
 save:
     save_trans: True
-    save_fake: True
+    save_fake: False
     # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant_gptq3
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_spinquant_gptq
