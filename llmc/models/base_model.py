@@ -40,6 +40,7 @@ class BaseModel(metaclass=ABCMeta):
         self.audio_model = None
         self.audio_projector = None
         self.modality = 'language'
+        self.modality_model = None
         self.kvcache_buffer = []
         self.build_tokenizer()
         self.build_model()
@@ -55,6 +56,14 @@ class BaseModel(metaclass=ABCMeta):
         assert modality in ['audio', 'vision', 'language', 'video_gen']
         self.modality = modality
         self.update_key_info()
+        if self.modality == 'audio':
+            self.modality_model = self.audio_model
+        elif self.modality == 'vision':
+            self.modality_model = self.vision_model
+        elif self.modality == 'video_gen':
+            self.modality_model = self.vision_projector
+        else:
+            self.modality_model = self.model
 
     def get_modality(self):
         assert self.modality in ['audio', 'vision', 'language']

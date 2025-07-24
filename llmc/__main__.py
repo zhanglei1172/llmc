@@ -78,9 +78,8 @@ def main(config):
     if 'train' in config:
         # backup model
         ignored_modules = []
-        for blockwise_opt in blockwise_opts:
-            blockwise_opt.deploy('train_rotate_quant')
-            dist.barrier()
+        deploy_all_modality(blockwise_opts, 'train_rotate_quant')
+        dist.barrier()
         def train(blockwise_opt):
             llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
             ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
@@ -151,7 +150,7 @@ def main(config):
                 if name in state_dict:
                     # 保持原 device，只拷贝数据
                     param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
-        train(blockwise_opts[0])
+        train(blockwise_opts[-1])
         gc.collect()
         torch.cuda.empty_cache()
         dist.barrier()

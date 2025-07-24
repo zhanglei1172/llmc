@@ -55,6 +55,8 @@ class Qwen25VL(Qwen25):
 
         self.vision_model = self.vlm_model.visual
         self.vision_projector = self.vision_model.merger
+        self.vision_embed = self.vision_model.patch_embed
+        self.vision_config = self.vlm_model_config.vision_config
         self.model = self.vlm_model
         self.model_config = self.vlm_model_config
 
@@ -173,21 +175,23 @@ class Qwen25VL(Qwen25):
                     'has_kwargs': False,
                 },
                 {
-                    'layers': {'mlp.fc1': block.mlp.fc1},
+                    'layers': {
+                        'mlp.gate_proj': block.mlp.gate_proj,
+                        'mlp.up_proj': block.mlp.up_proj,
+                    },
                     'prev_op': [block.norm2],
-                    'input': ['mlp.fc1'],
-                    'inspect': block.mlp.fc1,
+                    'input': ['mlp.gate_proj'],
+                    'inspect': block.mlp,
                     'has_kwargs': False,
                     'is_mlp': True,
                 },
                 {
-                    'layers': {'mlp.fc2': block.mlp.fc2},
-                    'prev_op': [block.mlp.fc1],
-                    'input': ['mlp.fc2'],
-                    'inspect': block.mlp.fc2,
+                    'layers': {'mlp.down_proj': block.mlp.down_proj},
+                    'prev_op': [block.mlp.up_proj],
+                    'input': ['mlp.down_proj'],
+                    'inspect': block.mlp.down_proj,
                     'has_kwargs': False,
                     'is_mlp': True,
-                    'do_trans': False
                 },
             ]
         else:

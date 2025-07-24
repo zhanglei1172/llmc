@@ -1,0 +1,78 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL
+    path: /workspace/gaoy25@xiaopeng.com/v3_datas/original_model/v0-20250601-000047/
+    tokenizer_mode: slow
+    torch_dtype: auto
+eval:
+    eval_pos: [pretrain,transformed,fake_quant]
+    type: vqa
+    name: [mme]
+    download: False
+    path: /workspace/lim42@xiaopeng.com/dataset/mme/
+    bs: 1
+    limit: 100  # Limit test num for evaluation
+    inference_per_block: False
+#   - eval_pos: [pretrain,transformed,fake_quant]
+#     name: wikitext2
+#     type: ppl
+#     download: True
+#     path: ""
+#     seq_len: 2048
+#     bs: 1
+#     inference_per_block: False
+#   - eval_pos: [transformed,fake_quant]
+#     name: wikitext2
+#     type: token_acc
+#     download: True
+#     path: ""
+#     seq_len: 2048
+#     bs: 1
+#     inference_per_block: False
+#   - eval_pos: [transformed,fake_quant]
+#     name: wikitext2
+#     type: mse
+#     download: True
+#     path: ""
+#     seq_len: 2048
+#     bs: 1
+#     inference_per_block: False
+quant:
+    vision:
+        method: Quarot
+        weight:
+            bit: 8
+            symmetric: True
+            granularity: per_channel
+            group_size: -1
+            calib_algo: minmax
+        act:
+            bit: 8
+            symmetric: True
+            granularity: per_token
+        special:
+            rotate_mode: hadamard
+            fp32_had: True
+            online_rotate: False
+    language:
+        method: Quarot
+        weight:
+            bit: 8
+            symmetric: True
+            granularity: per_channel
+            group_size: -1
+            calib_algo: minmax
+        act:
+            bit: 8
+            symmetric: True
+            granularity: per_token
+        special:
+            rotate_mode: hadamard
+            fp32_had: True
+            online_rotate: False
+save:
+    # Save the Quarot-transformed model.
+    save_trans: True
+    save_fake: False
+    save_path: /workspace/lim42@xiaopeng.com/binary_data/llmc_out/qwen25vl_vision_quarot

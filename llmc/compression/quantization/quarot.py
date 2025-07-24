@@ -21,7 +21,53 @@ class Quarot(BaseBlockwiseQuantization):
         super().__init__(model, quant_config, input, padding_mask, config)
         self.dev = torch.device('cuda')
         self.add_quant_config()
-        self.preprocess()
+        if self.modality == 'vision':
+            self.vision_preprocess()
+        elif self.modality == 'language':
+            self.preprocess()
+        else:
+            raise ValueError(f'Unsupported modality {self.modality}')
+
+    def vision_preprocess(self):
+        self.Q = self.get_orthogonal_matrix()
+        self.R2 = random_hadamard_matrix(self.hidden_size // self.num_heads, self.dev)
+
+        # Rotate the vision projector
+        vision_projector = self.model.vision_projector
+        if vision_projector is not None:
+            logger.info('Rotating vision projector layer.')
+            pre_vison_proj_ln = vision_projector.ln_q
+            self.fuse_ln_fcs(pre_vison_proj_ln, [vision_projector.mlp[0]])
+            pre_vison_proj_ln_name = get_module_name(vision_projector, pre_vison_proj_ln)
+            self.model.replace_module_subset(
+                LlmcRMSNorm,
+                self.model.vision_projector,
+                {'layers': {pre_vison_proj_ln_name: pre_vison_proj_ln}},
+                None,
+                {},
+            )
+            vision_up_proj = [self.model.vision_projector.mlp[0]]
+            for layer in vision_up_proj:
+                W_ = layer.weight.data
+                dtype = layer.weight.data.dtype
+                init_shape = W_.shape
+                temp = W_.reshape(-1, init_shape[-1] // self.hidden_size, self.hidden_size)
+                temp = temp.to(device=self.dev, dtype=torch.float64) @ self.Q
+                W_ = temp.reshape(init_shape)
+                layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
+
+        # Rotate the vision embed layers
+        vision_embed = [self.model.vision_embed.proj]
+        if vision_embed is not None:
+            logger.info('Rotating vision head layers.')
+            for layer in vision_embed:
+                W_ = layer.weight.data
+                dtype = layer.weight.data.dtype
+                init_shape = W_.shape
+                temp = W_.reshape(self.hidden_size, -1)
+                temp = self.Q.T @ temp.to(device=self.dev, dtype=torch.float64)
+                W_ = temp.reshape(init_shape)
+                layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
 
     def preprocess(self):
         if torch.equal(
@@ -37,6 +83,7 @@ class Quarot(BaseBlockwiseQuantization):
             self.remove_mean_from_embed()
 
         self.Q = self.get_orthogonal_matrix()
+        self.R2 = random_hadamard_matrix(self.hidden_size // self.num_heads, self.dev)
         self.rotate_embeddings(self.Q)
 
         pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
@@ -142,12 +189,24 @@ class Quarot(BaseBlockwiseQuantization):
                 )
             else:
                 self.rotate_post_layers(layers, self.Q, exact_had=False)
-                if self.online_rotate:
-                    if prev_op[0] is not None:
-                        apply_exact_had_to_linear(
-                            prev_op[0], had_dim=self.head_dim, output=True
-                        )
-                        apply_exact_had_to_linear(layers[0], had_dim=-1, output=False)
+                if prev_op[0] is not None:
+                    if 'qkv' in get_module_name(self.model.model, prev_op[0]):
+                        qkv_data = list(torch.split(prev_op[0].weight.data, self.hidden_size, dim=0))
+                        v_data = qkv_data[-1].clone()
+                        prev_op[0].weight.data = v_data
+                        if prev_op[0].bias is not None:
+                            qkv_bias = list(torch.split(prev_op[0].bias.data, self.hidden_size, dim=0))
+                            v_bias = qkv_bias[-1].clone()
+                            prev_op[0].bias.data = v_bias
+                        apply_exact_had_to_linear(prev_op[0], had_dim=self.head_dim, output=True, R2=self.R2)
+                        qkv_data[-1] = prev_op[0].weight.data
+                        prev_op[0].weight.data = torch.cat(qkv_data, dim=0)
+                        if prev_op[0].bias is not None:
+                            qkv_bias[-1] = prev_op[0].bias.data
+                            prev_op[0].bias.data = torch.cat(qkv_bias, dim=0)
+                    else:
+                        apply_exact_had_to_linear(prev_op[0], had_dim=self.head_dim, output=True, R2=self.R2)
+                apply_exact_had_to_linear(layers[0], had_dim=self.head_dim, output=False, R2=self.R2)
 
     @torch.no_grad()
     def save_model(self, path):

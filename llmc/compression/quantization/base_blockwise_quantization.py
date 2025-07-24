@@ -282,7 +282,10 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 self.config['model']['type'] in ['Opt', 'Llama']
             ), 'Please set online_rotate=False'
             self.fp32_had = special_config.get('fp32_had', False)
-        if self.quant_config.modality != 'video_gen':
+        # if self.quant_config.modality != 'video_gen':
+        if self.quant_config.modality == 'vision':
+            self.set_vision_model_config()
+        elif self.quant_config.modality == 'language':
             self.set_model_config()
         self.modality = self.quant_config.modality
         logger.info(f'self.quant_objects : {self.quant_config.modality}')
@@ -305,6 +308,22 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.intermediate_size = self.model.model_config.intermediate_size
         if hasattr(self.model.model_config, 'num_key_value_heads'):
             self.num_key_value_heads = self.model.model_config.num_key_value_heads
+            self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+            if self.num_key_value_groups > 1:
+                self.has_gqa = True
+            else:
+                self.has_gqa = False
+        else:
+            self.has_gqa = False
+
+    def set_vision_model_config(self):
+        self.hidden_size = self.model.vision_config.hidden_size
+        self.num_heads = self.model.vision_config.num_heads
+        self.head_dim = self.hidden_size // self.num_heads
+        if hasattr(self.model.vision_config, 'intermediate_size'):
+            self.intermediate_size = self.model.vision_config.intermediate_size
+        if hasattr(self.model.vision_config, 'num_key_value_heads'):
+            self.num_key_value_heads = self.model.vision_config.num_key_value_heads
             self.num_key_value_groups = self.num_heads // self.num_key_value_heads
             if self.num_key_value_groups > 1:
                 self.has_gqa = True
@@ -887,9 +906,12 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def rotate_weight(self, weight, bias, Q, transpose):
         dtype = weight.dtype
         dev = weight.data.device
+        init_shape = weight.shape
         R_b = bias
 
-        W = weight.data.to(device=dev, dtype=torch.float64)
+        W = weight.data.to(device=dev, dtype=torch.float64).reshape(
+            (Q.shape[0], -1) if transpose else (-1, Q.shape[0])
+        )
         Q = Q.to(device=dev, dtype=torch.float64)
         if not transpose:
             R_W = torch.matmul(W, Q).to(device=ROTATE_DEV, dtype=dtype)
@@ -899,10 +921,22 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 b = bias.data.to(device=dev, dtype=torch.float64)
                 R_b = torch.matmul(Q.T, b).to(device=ROTATE_DEV, dtype=dtype)
 
-        return R_W, R_b
+        return R_W.reshape(init_shape), R_b
 
     def fuse_ln_fcs(self, ln, fcs):
         for fc in fcs:
+            fc_hidden_size = fc.weight.shape[-1]
+            ln_hidden_size = ln.weight.shape[-1]
+            # duplicate the ln weight if fc_hidden_size > ln_hidden_size
+            if fc_hidden_size > ln_hidden_size:
+                ln_W = ln.weight.data.double().repeat(fc_hidden_size // ln_hidden_size)
+                if hasattr(ln, 'bias') and ln.bias is not None:
+                    ln_b = ln.bias.data.double().repeat(fc_hidden_size // ln_hidden_size)
+            else:
+                ln_W = ln.weight.data.double()
+                if hasattr(ln, 'bias') and ln.bias is not None:
+                    ln_b = ln.bias.data.double()
+            
             if fc.weight.data.dtype == torch.float8_e4m3fn:
                 fc.weight.data \
                     = weight_cast_to_bf16(fc.weight.data,
@@ -911,14 +945,14 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             fc_dtype = fc.weight.dtype
             if hasattr(ln, 'bias') and ln.bias is not None:
                 W = fc.weight.data.double().clone()
-            fc.weight.data = (fc.weight.data.double() * ln.weight.double()).to(fc_dtype)
+            fc.weight.data = (fc.weight.data.double() * ln_W).to(fc_dtype)
             if hasattr(ln, 'bias') and ln.bias is not None:
                 if fc.bias is None:
                     fc.bias = torch.nn.Parameter(
                         torch.zeros(fc.out_features, dtype=torch.float64)
                     )
                 fc.bias.data = fc.bias.data.double().to(device=W.device) + torch.matmul(
-                    W, ln.bias.double()
+                    W, ln_b
                 )
                 fc.bias.data = fc.bias.data.to(fc_dtype)
 

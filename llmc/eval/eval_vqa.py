@@ -23,6 +23,7 @@ class VQAEval:
             self.eval_dataset_name = [self.eval_dataset_name, ]
         self.eval_dataset_path = self.eval_config['path']
         self.eval_bs = self.eval_config['bs']
+        self.eval_limit = self.eval_config.get('limit', None)
 
     def eval(
         self,
@@ -58,7 +59,7 @@ class VQAEval:
         datetime_str: str = get_datetime_str(),
         cli_args=None,
     ):
-
+        limit = self.eval_limit if self.eval_limit is not None else limit
         model = llmc_model.eval_name
         model_args = 'pretrained=' + self.model_path + ',device_map=auto'
         batch_size = self.eval_bs

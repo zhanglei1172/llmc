@@ -15,7 +15,9 @@ from .module_utils import *
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
                            EffcientFakeQuantLinear, FakeQuantLinear, RotateFakeQuantLinear,
                            LlmcRMSNorm, OriginEmbedding, OriginFloatLinear,
-                           RotateEmbedding, RotateLinear2,_REALQUANT_LINEAR_MAP_, get_module_name)
+                           OriginFloatConv3d,
+                           RotateEmbedding, RotateLinear2, _ROTATE_LINEAR_MAP_,
+                           _REALQUANT_LINEAR_MAP_, get_module_name)
 from .rotate_utils import ActRotater, RotateModule, WeightRotater
 
 
@@ -25,7 +27,72 @@ class SpinQuant(BaseBlockwiseQuantization):
         super().__init__(model, quant_config, input, padding_mask, config)
         self.dev = torch.device('cuda')
         self.add_quant_config()
-        self.preprocess()
+        self._atten_inspect_name = 'self_attn'
+        if self.modality == 'vision':
+            self.vision_preprocess()
+        elif self.modality == 'language':
+            self.preprocess()
+        else:
+            raise ValueError(f'Unsupported modality {self.modality}')
+
+    def vision_preprocess(self):
+        for m in self.model.modality_model.parameters():
+            m.requires_grad = False
+        Q1 = self.get_orthogonal_matrix(self.hidden_size)
+        self.model.modality_model.Q1 = RotateModule(Q1)
+        # Rotate the vision projector
+        layers_dict = {}
+        args = {}
+        args['Q1'] = self.model.modality_model.Q1
+        args['Q2'] = None
+        args['transpose'] = False
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        vision_projector = self.model.vision_projector
+        if vision_projector is not None:
+            logger.info('Rotating vision projector layer.')
+            pre_vison_proj_ln = vision_projector.ln_q
+            self.fuse_ln_fcs(pre_vison_proj_ln, [vision_projector.mlp[0]])
+            pre_vison_proj_ln_name = get_module_name(vision_projector, pre_vison_proj_ln)
+            self.model.replace_module_subset(
+                LlmcRMSNorm,
+                self.model.vision_projector,
+                {'layers': {pre_vison_proj_ln_name: pre_vison_proj_ln}},
+                None,
+                {},
+            )
+            vision_up_proj = [self.model.vision_projector.mlp[0]]
+            for layer in vision_up_proj:
+                rot_layer_name = get_module_name(self.model.model, layer)
+                layers_dict[rot_layer_name] = layer
+        if layers_dict:
+            self.model.replace_module_subset(
+                RotateLinear2,
+                self.model.model,
+                {'layers': layers_dict},
+                None,
+                params_dict
+            )
+
+        # Rotate the vision embed layers
+
+        args = {}
+        args['Q1'] = self.model.modality_model.Q1
+        args['Q2'] = None
+        args['transpose'] = True
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        vision_embed = [self.model.vision_embed.proj]
+        if vision_embed is not None:
+            logger.info('Rotating vision head layers.')
+            for layer in vision_embed:
+                rot_layer_name = get_module_name(self.model.model, layer)
+
+                self.model.replace_module_subset(
+                    _ROTATE_LINEAR_MAP_[type(layer)],
+                    self.model.model,
+                    {'layers': {rot_layer_name: layer}},
+                    None,
+                    params_dict
+                )
 
     def add_quant_config(self):
         self.rotate_mode = self.quant_config['special']['rotate_mode']
@@ -34,14 +101,14 @@ class SpinQuant(BaseBlockwiseQuantization):
         # self.o_proj_group_quant = self.quant_config['special']['o_proj_group_quant']
 
     def preprocess(self):
-        for m in self.model.model.parameters():
+        for m in self.model.modality_model.parameters():
             m.requires_grad = False
 
         if not self.config['model']['type'].startswith('Qwen'):
             self.remove_mean_from_embed()
 
         Q1 = self.get_orthogonal_matrix(self.hidden_size)
-        self.model.model.Q1 = RotateModule(Q1)
+        self.model.modality_model.Q1 = RotateModule(Q1)
 
         self.register_embed_spin_parameters()
 
@@ -88,7 +155,7 @@ class SpinQuant(BaseBlockwiseQuantization):
     def register_embed_spin_parameters(self):
         embedding_layer = self.model.get_embed_layers()[0]
         args = {}
-        args['Q1'] = self.model.model.Q1
+        args['Q1'] = self.model.modality_model.Q1
         args['Q2'] = None
         args['transpose'] = False
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
@@ -104,7 +171,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         self.model.find_embed_layers()
         layers_dict = {}
         args = {}
-        args['Q1'] = self.model.model.Q1
+        args['Q1'] = self.model.modality_model.Q1
         args['Q2'] = None
         args['transpose'] = True
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
@@ -143,7 +210,7 @@ class SpinQuant(BaseBlockwiseQuantization):
     def register_lmhead_spin_parameters(self):
         lm_head_layer = self.model.get_head_layers()[0]
         args = {}
-        args['Q1'] = self.model.model.Q1
+        args['Q1'] = self.model.modality_model.Q1
         args['Q2'] = None
         args['transpose'] = False
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
@@ -205,6 +272,39 @@ class SpinQuant(BaseBlockwiseQuantization):
             )
             lm_head_layer.cpu()
 
+    def apply_vision_rotate_weight(self):
+        vision_up_proj = self.model.vision_projector.mlp[0]
+        if isinstance(vision_up_proj, RotateLinear2):
+            vision_up_proj.cuda()
+            weight, bias = vision_up_proj._rotate_weight()
+            vision_up_proj.weight.data = weight
+            if bias is not None:
+                vision_up_proj.bias.data = bias
+            vision_up_proj_name = get_module_name(self.model.model, vision_up_proj)
+            self.model.replace_module_subset(
+                OriginFloatLinear,
+                self.model.model,
+                {'layers': {vision_up_proj_name: vision_up_proj}},
+                None,
+                {}
+            )
+            vision_up_proj.cpu()
+        vision_embed = self.model.vision_embed.proj
+        if isinstance(vision_embed, RotateConv3d):
+            vision_embed.cuda()
+            weight, bias = vision_embed._rotate_weight()
+            vision_embed.weight.data = weight
+            if bias is not None:
+                vision_embed.bias.data = bias
+            vision_embed_name = get_module_name(self.model.model, vision_embed)
+            self.model.replace_module_subset(
+                OriginFloatConv3d,
+                self.model.model,
+                {'layers': {vision_embed_name: vision_embed}},
+                None,
+                {}
+            )
+            vision_embed.cpu()
 
     def get_orthogonal_matrix(self, size):
         if self.rotate_mode == 'random':
@@ -234,12 +334,14 @@ class SpinQuant(BaseBlockwiseQuantization):
         ), 'Only support single prev_op. If multi prev_ops, code need to be updated.'
 
         layers = list(layers_dict.values())
+        if self.modality == 'vision':
+            raise NotImplementedError('SpinQuant does not support vision modality yet. Becasue(qkv concat Linear)')
 
         if isinstance(prev_op[0], tuple(_LLMC_LN_TYPES_ + _TRANSFORMERS_LN_TYPES_)):
             self.fuse_ln_fcs(prev_op[0], layers)
             for n in layers_dict.keys():
                 m = layers_dict[n]
-                self.replace_rotate_fc(block, n, m, Q1=self.model.model.Q1, Q2=None, transpose=False)
+                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False)
             if 'is_mlp' not in subset or not subset['is_mlp']:
                 Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
                 subset['inspect'].Q2 = RotateModule(Q2)
@@ -253,22 +355,37 @@ class SpinQuant(BaseBlockwiseQuantization):
             if 'is_mlp' in subset and subset['is_mlp']:
                 if self.online_rotate:
                     apply_exact_had_to_linear(m, had_dim=-1, output=False)
-                self.replace_rotate_fc(block, n, m, Q1=self.model.model.Q1, Q2=None, transpose=True)
+                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=True)
             else:
-                self.replace_rotate_fc(block, n, m, Q1=self.model.model.Q1, Q2=block.self_attn.Q2, transpose=True)
-                self.replace_rotate_fc(block, 'self_attn.v_proj', prev_op[0], Q1=self.model.model.Q1, Q2=block.self_attn.Q2, transpose=False)
+                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=True)
+                self.replace_rotate_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
+    
+
+    def _get_block_Q2(self, block):
+        if hasattr(block, 'self_attn') and hasattr(block.self_attn, 'Q2'):
+            self._atten_inspect_name = 'self_attn'
+            return block.self_attn.Q2
+        elif hasattr(block, 'attn') and hasattr(block.attn, 'Q2'):
+            self._atten_inspect_name = 'attn'
+            return block.attn.Q2
+        return None
 
     def get_ignored_modules(self, model=None):
         if model is None:
             model = self.model
-        return [model.model.Q1] + [
-            block.self_attn.Q2 for block in model.get_blocks()
-        ]
+        ignored_modules = []
+        for n, m in model.model.named_parameters():
+            if n.endswith('Q1') or n.endswith('Q2'):
+                ignored_modules.append(m)
+        return ignored_modules
 
     def apply_rotate_weight(self):
-        self.apply_embedding_rotate_weight()
-        self.apply_lmhead_rotate_weight()
-        self.apply_fc_rotate_weight()
+        if self.modality == 'vision':
+            self.apply_vision_rotate_weight()
+        else:
+            self.apply_embedding_rotate_weight()
+            self.apply_lmhead_rotate_weight()
+            self.apply_fc_rotate_weight()
         if hasattr(self, "_vision_rotate_layers"):
             for module_name in self._vision_rotate_layers:
                 module = self.model.model.get_submodule(module_name)
@@ -301,9 +418,14 @@ class SpinQuant(BaseBlockwiseQuantization):
                 if not self.w_only
                 else None
             )
-            self.model.replace_module_all(
-                RotateFakeQuantLinear, params_dict
-            )
+            if self.modality == 'vision':
+                self.model.replace_vision_module_all(
+                    RotateFakeQuantLinear, params_dict
+                )
+            else:
+                self.model.replace_module_all(
+                    RotateFakeQuantLinear, params_dict
+                )
 
             logger.info(f'-- deploy_{quant_format}_model done --')
             logger.info(f'-- strat train rotation--')
