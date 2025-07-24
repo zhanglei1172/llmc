@@ -21,3 +21,4 @@ from .spqr import SpQR
 from .train_utils import SGDG
 from .fsdp_trainer import FSDPTrainer
 from .tesseraq import TesseraQ
+from .prefixquant import PrefixQuant

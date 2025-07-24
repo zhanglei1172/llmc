@@ -40,6 +40,18 @@ def main(config):
     if eval_res is not None:
         eval_ress.update(eval_res)
 
+    if 'prequant' in config:
+        pre_quant_config = config.prequant
+        pre_quant_config.modality = 'language'
+        blockwise_opt = ALGO_REGISTRY[pre_quant_config.method](
+            model,
+            pre_quant_config,
+            input=None,
+            padding_mask=None,
+            config=config,
+        )
+        blockwise_opt.run_block_loop()
+
     blockwise_opts = []
     modalities, modality_configs = get_modality(config)
     dist.barrier()

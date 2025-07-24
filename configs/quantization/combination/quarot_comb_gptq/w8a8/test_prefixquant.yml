@@ -1,0 +1,37 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL
+    path: /workspace/gaoy25@xiaopeng.com/v3_datas/original_model/v0-20250601-000047/
+    tokenizer_mode: slow
+    torch_dtype: auto
+eval:
+    eval_pos: [pretrain, transformed, fake_quant]
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+    # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+    bs: 1
+    inference_per_block: False
+quant:
+    method: PrefixQuant
+    weight:
+        bit: 8
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_token
+    special:
+        # prefixed_tokens: []
+        prefixed_tokens: [6802, 151645]
+        prefixed_kv_path: 
+# save:
+#     save_prefixed_kv: True
+#     save_trans: False
+#     save_fake: False
+#     save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_prefixquant
