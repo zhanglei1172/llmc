@@ -906,9 +906,12 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def rotate_weight(self, weight, bias, Q, transpose):
         dtype = weight.dtype
         dev = weight.data.device
+        init_shape = weight.shape
         R_b = bias
 
-        W = weight.data.to(device=dev, dtype=torch.float64)
+        W = weight.data.to(device=dev, dtype=torch.float64).reshape(
+            (Q.shape[0], -1) if transpose else (-1, Q.shape[0])
+        )
         Q = Q.to(device=dev, dtype=torch.float64)
         if not transpose:
             R_W = torch.matmul(W, Q).to(device=ROTATE_DEV, dtype=dtype)
@@ -918,7 +921,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 b = bias.data.to(device=dev, dtype=torch.float64)
                 R_b = torch.matmul(Q.T, b).to(device=ROTATE_DEV, dtype=dtype)
 
-        return R_W, R_b
+        return R_W.reshape(init_shape), R_b
 
     def fuse_ln_fcs(self, ln, fcs):
         for fc in fcs:

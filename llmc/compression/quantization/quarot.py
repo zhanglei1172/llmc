@@ -54,7 +54,7 @@ class Quarot(BaseBlockwiseQuantization):
                 temp = W_.reshape(-1, init_shape[-1] // self.hidden_size, self.hidden_size)
                 temp = temp.to(device=self.dev, dtype=torch.float64) @ self.Q
                 W_ = temp.reshape(init_shape)
-                layer.weight.data = W_.to(device='cpu', dtype=dtype)
+                layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
 
         # Rotate the vision embed layers
         vision_embed = [self.model.vision_embed.proj]
@@ -67,7 +67,7 @@ class Quarot(BaseBlockwiseQuantization):
                 temp = W_.reshape(self.hidden_size, -1)
                 temp = self.Q.T @ temp.to(device=self.dev, dtype=torch.float64)
                 W_ = temp.reshape(init_shape)
-                layer.weight.data = W_.to(device='cpu', dtype=dtype)
+                layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
 
     def preprocess(self):
         if torch.equal(

@@ -568,6 +568,77 @@ class OriginFloatLinear(nn.Module):
             f'bias={self.bias is not None})'
         )
 
+class OriginFloatConv3d(nn.Module):
+    def __init__(self, weight, bias, ori_module):
+        super().__init__()
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
+        if bias is not None:
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
+        else:
+            self.bias = None
+
+        for name, buf in ori_module.named_buffers():
+            if name.startswith('buf_'):
+                self.register_buffer(name, buf.data)
+        if hasattr(self, 'buf_rotate') and self.buf_rotate:
+            self.rotater = ori_module.rotater
+        else:
+            self.buf_rotate = False
+
+        self.in_channels = ori_module.in_channels
+        self.out_channels = ori_module.out_channels
+        self.kernel_size = ori_module.kernel_size
+        self.stride = ori_module.stride
+        self.padding = ori_module.padding
+        self.dilation = ori_module.dilation
+        self.groups = ori_module.groups
+        self.padding_mode = ori_module.padding_mode
+
+    @torch.no_grad()
+    def forward(self, x):
+        if hasattr(self, 'buf_rotate') and self.buf_rotate:
+            x = self.rotater.rotate(x)
+        return F.conv3d(
+            x, self.weight, self.bias, self.stride, self.padding,
+            self.dilation, self.groups
+        )
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module):
+        if isinstance(module, nn.Conv3d):
+            return module
+
+        weight = module.weight.data
+        if module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(weight, bias, module)
+
+        new_module.in_channels = module.in_channels
+        new_module.out_channels = module.out_channels
+        new_module.kernel_size = module.kernel_size
+        new_module.stride = module.stride
+        new_module.padding = module.padding
+        new_module.dilation = module.dilation
+        new_module.groups = module.groups
+        new_module.padding_mode = module.padding_mode
+
+        return new_module
+
+    def __repr__(self):
+        return (
+            f'OriginFloatConv3d(in_channels={self.in_channels},'
+            f'out_channels={self.out_channels},'
+            f'kernel_size={self.kernel_size},'
+            f'stride={self.stride},'
+            f'padding={self.padding},'
+            f'dilation={self.dilation},'
+            f'groups={self.groups},'
+            f'padding_mode={self.padding_mode})'
+        )
 
 class Rotater:
     def __init__(
@@ -690,8 +761,98 @@ class RotateLinear2(nn.Module):
             f"a_rotate={self.buf_a_rotate})"
         )
 
+class RotateConv3d(nn.Module):
+    def __init__(self, weight, bias, ori_module, w_rot, a_rot):
+        super().__init__()
+        self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
+        if bias is not None:
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
+        else:
+            self.bias = None
 
+        for name, buf in ori_module.named_buffers():
+            if name.startswith("buf_"):
+                self.register_buffer(name, buf.data)
 
+        self.w_rot = w_rot
+        self.a_rot = a_rot
+
+        self.register_buffer("buf_w_rotate", torch.tensor(w_rot is not None))
+        self.register_buffer("buf_a_rotate", torch.tensor(a_rot is not None))
+        self.in_channels = ori_module.in_channels
+        self.out_channels = ori_module.out_channels
+        self.kernel_size = ori_module.kernel_size
+        self.stride = ori_module.stride
+        self.padding = ori_module.padding
+        self.dilation = ori_module.dilation
+        self.groups = ori_module.groups
+        self.padding_mode = ori_module.padding_mode
+        assert self.padding_mode == 'zeros', \
+            f"Unsupported padding mode: {self.padding_mode}. Only 'zeros' is supported."
+        
+
+    def forward(self, x):
+
+        if self.buf_a_rotate:
+            x = self.a_rot(x, self)
+
+        if self.buf_w_rotate:
+            weight, bias = self._rotate_weight()
+            # self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+            # self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+        else:
+            weight = self.weight
+            bias = self.bias
+        # weight = getattr(self, "tmp_weight", self.weight)
+        # bias = getattr(self, "tmp_bias", self.bias)
+        x = torch.functional.F.conv3d(
+            x, weight, bias, self.stride,
+            self.padding, self.dilation, self.groups
+        )
+        return x
+    
+    def _rotate_weight(self):
+        tmp_weight, tmp_bias = self.w_rot(self)
+        return tmp_weight, tmp_bias
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_rot, a_rot):
+        weight = module.weight.data
+        if module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(
+            weight,
+            bias,
+            ori_module=module,
+            w_rot=w_rot,
+            a_rot=a_rot
+        )
+        return new_module
+
+    @classmethod
+    def get_func_name(cls, any_callable):
+        if isinstance(any_callable, partial):
+            return any_callable.func.__name__
+        return any_callable.__name__
+
+    def __repr__(self):
+        return (
+            f"RotateConv3d(in_channels={self.in_channels}, "
+            f"out_channels={self.out_channels}, "
+            f"kernel_size={self.kernel_size}, "
+            f"stride={self.stride}, "
+            f"padding={self.padding}, "
+            f"dilation={self.dilation}, "
+            f"groups={self.groups}, "
+            f"padding_mode={self.padding_mode}, "
+            f"bias={self.bias is not None}, "
+            f"w_rotate={self.buf_w_rotate}, "
+            f"a_rotate={self.buf_a_rotate})"
+        )
 class RotateLinear(nn.Module):
     def __init__(
         self,
@@ -969,6 +1130,88 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
             f"a_rotate={self.buf_a_rotate},"
         )
 
+class RotateFakeQuantConv3d(RotateFakeQuantLinear):
+    def __init__(self, weight, bias, ori_module, w_qdq, a_qdq, w_rot, a_rot):
+        super().__init__(weight, bias, ori_module, w_qdq, a_qdq, w_rot, a_rot)
+        self.in_channels = ori_module.in_channels
+        self.out_channels = ori_module.out_channels
+        self.kernel_size = ori_module.kernel_size
+        self.stride = ori_module.stride
+        self.padding = ori_module.padding
+        self.dilation = ori_module.dilation
+        self.groups = ori_module.groups
+        self.padding_mode = ori_module.padding_mode
+        assert self.padding_mode == 'zeros', \
+            f"Unsupported padding mode: {self.padding_mode}. Only 'zeros' is supported."
+    
+    def forward(self, x):
+        if hasattr(self, "a_rot"):
+            x = self.a_rot(x, self)
+
+        if self.a_qdq is not None:
+            x = self.a_qdq(x, self)
+
+        if hasattr(self, "w_rot") and self.w_rot is not None:
+            tmp_weight, tmp_bias = self._rotate_weight()
+            # friendly for FSDP:
+            # self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+            # self.register_buffer("tmp_bias", tmp_bias, persistent=False)
+            # self.tmp_weight = tmp_weight
+            # self.tmp_bias = tmp_bias
+            # if self.w_qdq is not None:
+            tmp_weight = self.w_qdq(self, tmp_weight)
+        else:
+            raise NotImplementedError
+            if not hasattr(self, "tmp_weight"):
+                tmp_weight = self.w_qdq(self)
+                self.register_buffer("tmp_weight", tmp_weight, persistent=False)
+                self.tmp_bias = self.bias
+
+            elif self.dynamic_quant_weight:
+                # if self.w_qdq is not None:
+                self.tmp_weight = self.w_qdq(self)
+                self.tmp_bias = self.bias
+
+            elif self.dynamic_quant_tmp_weight:
+                # if self.w_qdq is not None:
+                self.tmp_weight = self.w_qdq(self)
+
+        y = torch.functional.F.conv3d(
+            x, tmp_weight, tmp_bias, stride=self.stride,
+            padding=self.padding, dilation=self.dilation,
+            groups=self.groups
+        )
+        return y
+    
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_qdq, a_qdq):
+        if not isinstance(module, RotateFakeQuantConv3d):
+            return module
+        weight = module.weight.data
+        if hasattr(module, 'bias') and module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(weight, bias, ori_module=module, w_qdq=w_qdq, a_qdq=a_qdq, w_rot=module.w_rot, a_rot=module.a_rot)
+        new_module.w_qdq_name = cls.get_func_name(w_qdq)
+        new_module.a_qdq_name = (
+            cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
+        )
+        return new_module
+
+    def __repr__(self):
+        return (
+            f"RotateFakeQuantConv3d(in_features={self.in_features},"
+            f"out_features={self.out_features}, bias={self.bias is not None},"
+            f"weight_quant={self.w_qdq_name}, "
+            f"act_quant={self.a_qdq_name}, "
+            f"w_rotate={self.buf_w_rotate}, "
+            f"a_rotate={self.buf_a_rotate})"
+        )
+    
+    
 class EffcientFakeQuantLinear(nn.Module):
     def __init__(self, weight, bias, ori_module, a_qdq):
         super().__init__()
@@ -1428,4 +1671,10 @@ _REALQUANT_LINEAR_MAP_ = {
     'autoawq_quant': AutoawqRealQuantLinear,
     'mlcllm_quant': MlcllmRealQuantLinear,
     'lightx2v_quant': Lightx2vRealQuantLinear,
+}
+
+_ROTATE_LINEAR_MAP_ = {
+    nn.Linear: RotateLinear,
+    # nn.Conv2d: RotateConv2d,
+    nn.Conv3d: RotateConv3d,
 }
