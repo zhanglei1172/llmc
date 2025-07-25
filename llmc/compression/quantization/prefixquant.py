@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from loguru import logger
 from tqdm import tqdm
+from transformers.cache_utils import DynamicCache
 
 from llmc.utils.registry_factory import ALGO_REGISTRY
 
@@ -70,7 +71,11 @@ class PrefixQuant(BaseBlockwiseQuantization):
             #     return args, kwargs
             past_key_value = kwargs['past_key_value']
             past_seen_tokens = past_key_value.get_seq_length(len(self.model.blocks)) if past_key_value is not None else 0
-            assert past_key_value is not None, "past_key_value must not be None"
+            if not past_key_value:
+                past_key_value = DynamicCache()
+                kwargs['past_key_value'] = past_key_value
+            # assert past_key_value is not None, "past_key_value must not be None"
+
             old_update_cache = past_key_value.update
             def update_cache(key_states, value_states, layer_idx, cache_kwargs=None):
                 inp_seq_len = key_states.shape[-2]

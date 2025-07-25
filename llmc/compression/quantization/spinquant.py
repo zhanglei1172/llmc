@@ -375,7 +375,7 @@ class SpinQuant(BaseBlockwiseQuantization):
             model = self.model
         ignored_modules = []
         for n, m in model.model.named_parameters():
-            if n.endswith('Q1') or n.endswith('Q2'):
+            if 'Q1' in n or 'Q2' in n:
                 ignored_modules.append(m)
         return ignored_modules
 
