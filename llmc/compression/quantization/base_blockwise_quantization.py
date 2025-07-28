@@ -278,9 +278,9 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         # set online-rotation config
         self.online_rotate = special_config.get('online_rotate', False)
         if self.online_rotate:
-            assert (
-                self.config['model']['type'] in ['Opt', 'Llama']
-            ), 'Please set online_rotate=False'
+            # assert (
+            #     self.config['model']['type'] in ['Opt', 'Llama']
+            # ), 'Please set online_rotate=False'
             self.fp32_had = special_config.get('fp32_had', False)
         # if self.quant_config.modality != 'video_gen':
         if self.quant_config.modality == 'vision':
@@ -335,7 +335,8 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def replace_rotate_linears(self, block):
         for n, m in block.named_modules():
             if isinstance(m, nn.Linear) and (
-                'down_proj' in n or 'o_proj' in n or 'fc2' in n or 'out_proj' in n
+                # 'down_proj' in n or 'o_proj' in n or 'fc2' in n or 'out_proj' in n
+                'down_proj' in n or 'fc2' in n
             ):
                 subset = {'layers': {n: m}}
                 self.model.replace_module_subset(
