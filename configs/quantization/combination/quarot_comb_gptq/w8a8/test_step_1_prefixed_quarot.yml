@@ -6,7 +6,7 @@ model:
     tokenizer_mode: slow
     torch_dtype: auto
 eval:
-    eval_pos: [transformed]
+    eval_pos: [pretrain, transformed, fake_quant]
     name: wikitext2
     download: False
     path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
@@ -15,7 +15,7 @@ eval:
     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
     bs: 1
     inference_per_block: False
-quant:
+prequant:
     method: PrefixQuant
     weight:
         bit: 8
@@ -27,11 +27,26 @@ quant:
         symmetric: True
         granularity: per_token
     special:
-        # prefixed_tokens: []
         prefixed_tokens: [6802, 151645]
         prefixed_kv_path: 
+quant:
+    method: Quarot
+    weight:
+        bit: 8
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+        calib_algo: minmax
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_token
+    special:
+        rotate_mode: hadamard
+        fp32_had: True
+        online_rotate: False
 save:
-    save_prefixed_kv: True
-    save_trans: False
+    # Save the Quarot-transformed model.
+    save_trans: True
     save_fake: False
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/prefixquant
+    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_prefixed_quarot
