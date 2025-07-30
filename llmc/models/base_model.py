@@ -504,3 +504,6 @@ class BaseModel(metaclass=ABCMeta):
     def convert_dtype(self, dtype='torch.float16'):
         for i in range(len(self.blocks)):
             self.blocks[i] = self.blocks[i].to(dtype)
+
+    def before_save_model(self):
+        pass

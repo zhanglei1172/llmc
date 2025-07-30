@@ -47,7 +47,7 @@ class WeightRotater:
                     dtype = bias.dtype
                     dev = bias.data.device
                     bias_shape = bias.shape
-                    tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).data.to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
+                    tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
 
         if Q1 is None and Q2 is None:
             tmp_weight = weight
