@@ -185,7 +185,7 @@ def v4_general_preproc(processor, tokenizer, n_samples, seq_len, task_clss, data
             # 生成模型输入
             inputs = task.prepare_inputs(item)
             line_encoded = inputs['input_ids']
-            if line_encoded.shape[1] < seq_len:
+            if seq_len and line_encoded.shape[1] < seq_len:
                 continue
             samples.append(inputs)
             n_run += 1

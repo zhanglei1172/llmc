@@ -260,3 +260,30 @@ class BaseDataset(metaclass=ABCMeta):
             if 'negative_prompt' not in custom_data_samples[idx]:
                 custom_data_samples[idx]['negative_prompt'] = ''
         return custom_data_samples
+
+class MixDataset(BaseDataset):
+    def __init__(self, tokenizer, calib_cfg, batch_process=None, processor=None):
+        if isinstance(calib_cfg, dict):
+            calib_cfg = [calib_cfg]
+        self.datasets = []
+        for cfg in calib_cfg:
+            dataset = BaseDataset(tokenizer, cfg, batch_process, processor)
+            self.datasets.append(dataset)
+    
+    def get_calib_dataset(self):
+        calib_model_inputs = []
+        padding_mask = []
+        for dataset in self.datasets:
+            inputs, masks = dataset.get_calib_dataset()
+            calib_model_inputs.extend(inputs)
+            if masks is not None:
+                padding_mask.extend(masks)
+        if padding_mask:
+            assert len(calib_model_inputs) == len(padding_mask), \
+                "The length of calib_model_inputs and padding_mask must be the same."
+        else:
+            padding_mask = None
+        if len(calib_model_inputs) == 0:
+            raise ValueError("No samples found in the mixed datasets.")
+        logger.info(f'len(calib_model_inputs) : {len(calib_model_inputs)}')
+        return calib_model_inputs, padding_mask

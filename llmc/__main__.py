@@ -17,7 +17,7 @@ from transformers import (LlamaTokenizerFast, Trainer, TrainingArguments,
 from llmc.compression.quantization import *
 from llmc.compression.sparsification import *
 from llmc.compression.token_reduction import *
-from llmc.data import BaseDataset, BaseTokenizer, TrainJsonDataset
+from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
 from llmc.eval.utils import eval_model, get_eval_list
 from llmc.eval import PerplexityEval
 from llmc.models import *
@@ -69,7 +69,7 @@ def main(config):
             blockwise_opts.append(blockwise_opt)
             dist.barrier()
         else:
-            dataset = BaseDataset(
+            dataset = MixDataset(
                 model.get_tokenizer(), config.calib, model.batch_process, model.processor
             )
             calib_data, padding_mask = dataset.get_calib_dataset()
@@ -97,7 +97,7 @@ def main(config):
             ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
             llmc_model_to_train.model.config.use_cache = False
 
-            dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
+            dataset = MixDataset(tokenizer.get_tokenizer(), config.train.data)
 
             train_tokenizer = AutoTokenizer.from_pretrained(
                 pretrained_model_name_or_path=config.model.path,
