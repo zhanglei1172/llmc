@@ -70,7 +70,7 @@ def main(config):
             dist.barrier()
         else:
             dataset = BaseDataset(
-                model.get_tokenizer(), config.calib, model.batch_process
+                model.get_tokenizer(), config.calib, model.batch_process, model.processor
             )
             calib_data, padding_mask = dataset.get_calib_dataset()
             model.collect_first_block_input(calib_data, padding_mask)

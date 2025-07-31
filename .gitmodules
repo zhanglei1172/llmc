@@ -2,3 +2,6 @@
 	path = lm-evaluation-harness
 	url = https://github.com/ModelTC/llmc.git
 	branch = lm-eval
+[submodule "xq_eval"]
+	path = xq_eval
+	url = http://gitlab.xiaopeng.local:18080/xmart-ai-engine/xmart-quantization-evaluation.git
