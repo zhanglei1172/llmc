@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_v4_spinquant_gptq/transformed_model/
+    path: /code/llmc_test/work/out_v4_spinquant_gptq/transformed_model/
     torch_dtype: torch.bfloat16
 # calib:
 #     # name: pileval
@@ -93,7 +93,7 @@ quant:
     special:
         alpha: 0.8
         selected_layers: ["mlp.down_proj"]
-# save:
-#     save_trans: True
-#     save_fake: True
-#     save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_v4_spinquant_gptq_smoothquant
+save:
+    save_trans: True
+    save_fake: True
+    save_path: /code/llmc_test/work/out_v4_spinquant_gptq_smoothquant2

@@ -3,7 +3,7 @@ base:
 model:
     type: Qwen25VL_V4
     # Load spinquant-transformed model
-    path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_v4_spinquant/transformed_model
+    path: /code/llmc_test/work/out_v4_spinquant/transformed_model
     torch_dtype: torch.bfloat16
 calib:
     name: wikitext2
@@ -51,4 +51,4 @@ save:
     save_trans: True
     save_fake: False
     # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_v4_spinquant_gptq
+    save_path: /code/llmc_test/work/out_v4_spinquant_gptq

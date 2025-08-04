@@ -76,4 +76,4 @@ save:
     save_rotate_weight: True
     save_trans: True
     save_fake: False
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_v4_spinquant
+    save_path: /code/llmc_test/work/out_v4_spinquant

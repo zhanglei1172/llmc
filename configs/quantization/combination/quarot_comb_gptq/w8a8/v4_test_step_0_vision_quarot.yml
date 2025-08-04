@@ -1,0 +1,36 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    path: /code/llmc_test/work/out_v4_spinquant_gptq_smoothquant/transformed_model
+    torch_dtype: auto
+eval:
+    eval_pos: [pretrain,transformed,fake_quant]
+    type: vqa
+    name: [mme]
+    download: False
+    path: /workspace/lim42@xiaopeng.com/dataset/mme/
+    bs: 1
+    limit: 100  # Limit test num for evaluation
+    inference_per_block: False
+quant:
+    vision:
+        method: Quarot
+        weight:
+            bit: 8
+            symmetric: True
+            granularity: per_channel
+            group_size: -1
+            calib_algo: minmax
+        act:
+            bit: 8
+            symmetric: True
+            granularity: per_token
+        special:
+            rotate_mode: hadamard
+            fp32_had: True
+            online_rotate: False
+save:
+    save_trans: True
+    save_fake: True
+    save_path: /code/llmc_test/work/out_v4_spinquant_gptq_smoothquant_vit
