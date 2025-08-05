@@ -126,7 +126,7 @@ def main(config):
             #         eval_list.append(ppl_eval)
 
             train_data = TrainJsonDataset(
-                dataset.calib_dataset,
+                dataset.get_raw_calib_dataset(),
                 train_tokenizer,
                 block_size=config.train.data.seq_len,
             )

@@ -287,3 +287,13 @@ class MixDataset(BaseDataset):
             raise ValueError("No samples found in the mixed datasets.")
         logger.info(f'len(calib_model_inputs) : {len(calib_model_inputs)}')
         return calib_model_inputs, padding_mask
+
+    def get_raw_calib_dataset(self):
+        raw_calib_model_inputs = []
+        for dataset in self.datasets:
+            raw_inputs = dataset.calib_dataset
+            if raw_inputs is not None:
+                raw_calib_model_inputs.extend(raw_inputs)
+        if len(raw_calib_model_inputs) == 0:
+            raise ValueError("No samples found in the mixed datasets.")
+        return raw_calib_model_inputs

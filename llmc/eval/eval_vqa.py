@@ -1,6 +1,7 @@
 import random
 from typing import List, Optional, Union
 
+from easydict import EasyDict
 import numpy as np
 import torch
 from lmms_eval.evaluator import evaluate
@@ -57,7 +58,7 @@ class VQAEval:
         torch_random_seed: int = 1234,
         fewshot_random_seed: int = 1234,
         datetime_str: str = get_datetime_str(),
-        cli_args=None,
+        cli_args=EasyDict({"output_path": "./out"}),
     ):
         limit = self.eval_limit if self.eval_limit is not None else limit
         model = llmc_model.eval_name

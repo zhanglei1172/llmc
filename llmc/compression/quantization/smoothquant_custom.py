@@ -13,8 +13,8 @@ from .module_utils import _LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_
 @ALGO_REGISTRY
 class SmoothQuantCustom(SmoothQuant):
     @torch.no_grad()
-    def filter_subset(self, input_name):
-        if input_name == "mlp.down_proj":
+    def filter_subset(self, prev_op, input_name):
+        if input_name == "mlp.down_proj" or isinstance(prev_op[0], tuple(_LLMC_LN_TYPES_ + _TRANSFORMERS_LN_TYPES_)):
             return True
         else:
             return False
@@ -36,7 +36,7 @@ class SmoothQuantCustom(SmoothQuant):
         if self.selected_layers and input_name not in self.selected_layers:
             logger.info(f'Skipping layer {input_name} as it is not in selected layers.')
             return
-        if not self.filter_subset(input_name):
+        if not self.filter_subset(prev_op, input_name):
             logger.info('Do not transform this subset.')
             return
         layers = list(layers_dict.values())
