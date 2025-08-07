@@ -1,0 +1,55 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    # Load spinquant-transformed model
+    path: /dataset/workspace/zhangl98/v4-0807/w4a8/spinquant/transformed_model/
+    torch_dtype: torch.float32
+calib:
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+    n_samples: 512
+    bs: 32
+    seq_len: 2048
+    preproc: wikitext2_gptq
+    seed: *seed
+eval:
+    eval_pos: [pretrain, transformed, fake_quant]
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+    # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+    bs: 1
+    inference_per_block: False
+quant:
+    method: GPTQ
+    weight:
+        bit: 4
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+        calib_algo: mse
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_tensor
+        static: True
+        calib_algo: static_minmax
+    special:
+        actorder: True
+        static_groups: True
+        percdamp: 0.01
+        blocksize: 128
+        chunk_num: 4
+        true_sequential: True
+        online_rotate: False
+        fp32_had: True
+    quant_out: True
+save:
+    save_trans: True
+    save_fake: True
+    # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
+    save_path: /dataset/workspace/zhangl98/v4-0807/w4a8/spinquant_gptq

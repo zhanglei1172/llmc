@@ -1,0 +1,64 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    path: /dataset/workspace/zhangl98/v4-0807/w4a16/spinquant/transformed_model/
+    torch_dtype: torch.float16
+calib:
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+    n_samples: 512
+    bs: 16
+    seq_len: 2048
+    preproc: wikitext2_gptq
+    seed: *seed
+eval:
+  - eval_pos: [transformed,fake_quant]
+    name: wikitext2
+    type: ppl
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    bs: 1
+    inference_per_block: False
+#   - eval_pos: [pretrain,transformed,fake_quant]
+#     type: vqa
+#     name: [mmmu]
+#     download: False
+#     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+#     bs: 1
+#     limit: 200  # Limit test num for evaluation
+#     inference_per_block: False
+quant:
+    # vision:
+    #     method: RTN
+    #     weight:
+    #         bit: 4
+    #         symmetric: True
+    #         granularity: per_channel
+    #         group_size: -1
+    #         calib_algo: minmax
+    #     act:
+    #         bit: 16
+    #         symmetric: True
+    #         granularity: per_token
+    language:
+        method: RTN
+        weight:
+            bit: 4
+            symmetric: True
+            granularity: per_channel
+            group_size: -1
+            calib_algo: minmax
+        # act:
+        #     bit: 16
+        #     symmetric: True
+        #     granularity: per_tensor
+        #     static: True
+        #     calib_algo: static_minmax
+save:
+    # save_trans: True
+    save_fake: True
+    # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
+    save_path: /code/llmc_test/work/out_v4_test/v4-0807/wa16/sp_rtn
