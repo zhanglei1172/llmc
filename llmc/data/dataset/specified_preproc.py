@@ -181,16 +181,16 @@ def v4_general_preproc(processor, tokenizer, n_samples, seq_len, task_clss, data
     n_run = 0
     for idx in idxs:
         item = dataset[idx]
-        try:
+        # try:
             # 生成模型输入
-            inputs = task.prepare_inputs(item)
-            line_encoded = inputs['input_ids']
-            if seq_len and line_encoded.shape[1] < seq_len:
-                continue
-            samples.append(inputs)
-            n_run += 1
-            if n_run == n_samples:
-                break
-        except Exception as e:
-            print(f"Error processing item: {e}")
+        inputs = task.prepare_inputs(item)
+        line_encoded = inputs['input_ids']
+        if seq_len and line_encoded.shape[1] < seq_len:
+            continue
+        samples.append(inputs)
+        n_run += 1
+        if n_run == n_samples:
+            break
+        # except Exception as e:
+            # print(f"Error processing item: {e}")
     return samples

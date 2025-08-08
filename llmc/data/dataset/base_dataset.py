@@ -125,6 +125,7 @@ class BaseDataset(metaclass=ABCMeta):
                 elif self.preproc == 'v4_general_preproc':
                     preproc_param_dict['task_clss'] = self.task_clss
                     preproc_param_dict['processor'] = self.processor
+                    preproc_param_dict['generation_config'] = None
                     preproc_param_dict['data_path'] = self.calib_dataset_path
                     if self.special_config:
                         preproc_param_dict.update(self.special_config)
@@ -294,6 +295,9 @@ class MixDataset(BaseDataset):
             raw_inputs = dataset.calib_dataset
             if raw_inputs is not None:
                 raw_calib_model_inputs.extend(raw_inputs)
+            else:
+                calib_model_inputs = dataset.get_calib_model_inputs(None)
+                raw_calib_model_inputs.extend(calib_model_inputs)
         if len(raw_calib_model_inputs) == 0:
             raise ValueError("No samples found in the mixed datasets.")
         return raw_calib_model_inputs

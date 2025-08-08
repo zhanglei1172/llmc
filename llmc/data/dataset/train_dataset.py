@@ -1,5 +1,7 @@
 import torch
+import numpy as np
 from loguru import logger
+import copy
 
 
 class TrainJsonDataset(torch.utils.data.IterableDataset):
@@ -8,22 +10,38 @@ class TrainJsonDataset(torch.utils.data.IterableDataset):
         self.tokenizer = tokenizer
         self.block_size = block_size
         tokenized_datasets = []
+        self.data = []
         for d in raw_data:
-            tokenized_datasets.append(self.tokenize_function(d))
+            if "text" in d:
+                tokenized_datasets.append(self.tokenize_function(d))
+            else:
+                d.update(labels=d['input_ids'].detach())
+                self.data.append({k: (v.squeeze(0) if isinstance(v, torch.Tensor) else v) for k, v in d.items()})
 
-        grouped_dataset = self.group_texts(tokenized_datasets)
-        self.input_ids = grouped_dataset['input_ids']
-        self.labels = grouped_dataset['labels']
-        self.data = [
-            dict(input_ids=self.input_ids[i], labels=self.labels[i])
-            for i in range(len(self.input_ids))
-        ]
+        if tokenized_datasets:
+            grouped_dataset = self.group_texts(tokenized_datasets)
+            self.data.extend({
+                'input_ids': grouped_dataset['input_ids'][i], 
+                'labels': grouped_dataset['labels'][i]} for i in range(len(grouped_dataset['input_ids'])))
+        keys = set()
+        for d in self.data:
+            keys.update(d.keys())
+        for d in self.data:
+            for k in keys:
+                if k not in d:
+                    d[k] = None
+        np.random.shuffle(self.data)  # Shuffle the dataset
+        # self.data = [
+        #     dict(input_ids=self.input_ids[i], labels=self.labels[i],
+        #          attention_mask=self.attention_mask[i])
+        #     for i in range(len(self.input_ids))
+        # ]
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, i):
-        return dict(input_ids=self.input_ids[i], labels=self.labels[i])
+        return self.data[i]
 
     def __iter__(self):
         return iter(self.data)
