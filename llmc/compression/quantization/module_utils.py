@@ -10,6 +10,7 @@ from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 
 from .quant import FloatQuantizer
 from .utils import is_fp8_supported_gpu
+from .measure import MeasureRecorder
 
 if is_fp8_supported_gpu():
     from .kernel import act_quant, fp8_gemm, weight_cast_to_bf16
@@ -1292,6 +1293,118 @@ class EffcientFakeQuantLinear(nn.Module):
             f'debug_print={self.debug_print})'
         )
 
+class StatFakeQuantLinear(nn.Module):
+    def __init__(self, bias, ori_module, w_qdq, a_qdq, measurement="cosine"):
+        super().__init__()
+        self.recorder_qdq_w = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
+        self.recorder_qdq_a = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
+        self.recorder_qdq_o = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
+        self.recorder_graph = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
+        self.tmp_qdq = []
+        self.register_parameter('weight', nn.Parameter(ori_module.weight.data, requires_grad=False))
+        if bias is not None:
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
+        else:
+            self.bias = None
+        self.a_qdq = a_qdq
+        self.w_qdq = w_qdq
+        self.step_cnt = 0
+        self.register_buffer('graph_stat_step', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
+
+        for name, buf in ori_module.named_buffers():
+            if name.startswith('buf_'):
+                self.register_buffer(name, buf.data)
+        if hasattr(self, 'buf_rotate') and self.buf_rotate:
+            self.rotater = ori_module.rotater
+        else:
+            self.buf_rotate = False
+
+        if self.weight.data.dtype == torch.float8_e4m3fn:
+            self.fp8_forward = True
+            self.weight_scale_inv = ori_module.weight_scale_inv
+            self.block_size = ori_module.block_size
+        else:
+            self.fp8_forward = False
+    
+    @torch.no_grad()
+    def forward_func(self, x, w):
+        if self.fp8_forward:
+            y = block_wise_fp8_forward_func(
+                x, w, self.weight_scale_inv, self.block_size, self.bias
+            )
+        else:
+            y = torch.functional.F.linear(x, w, self.bias)
+        return y
+        
+
+    @torch.no_grad()
+    def forward(self, x):
+        if hasattr(self, 'buf_rotate') and self.buf_rotate:
+            x = self.rotater.rotate(x)
+        ori_y = self.forward_func(x, self.weight)
+        if self.graph_stat_step[0] == 0:
+            w_qdq = self.w_qdq(self)
+            if self.recorder_qdq_w.num_of_elements == 0:
+                self.recorder_qdq_w.update(y_pred=w_qdq, y_real=self.weight.data)
+
+            if self.a_qdq is not None:
+                x_qdq = self.a_qdq(x, self)
+                self.recorder_qdq_a.update(y_pred=x_qdq, y_real=x)
+                x = x_qdq
+            y = self.forward_func(x, w_qdq)
+            self.recorder_qdq_o.update(y_pred=y, y_real=ori_y)
+            return y
+        elif self.graph_stat_step[0] == 1:
+            w_qdq = self.w_qdq(self)
+            if self.a_qdq is not None:
+                x = self.a_qdq(x, self)    
+            y = self.forward_func(x, w_qdq)
+            self.tmp_qdq.append(y.cpu())
+            return y
+        elif self.graph_stat_step[0] == 2:
+            self.recorder_graph.update(
+                y_pred=self.tmp_qdq[self.step_cnt].to(ori_y.device), y_real=ori_y,
+            )
+            self.step_cnt += 1
+            return ori_y
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
+
+        if module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(bias, ori_module=module, w_qdq=w_qdq, a_qdq=a_qdq)
+
+        new_module.in_features = module.in_features
+        new_module.out_features = module.out_features
+        new_module.w_qdq_name = cls.get_func_name(w_qdq)
+        new_module.a_qdq_name = (
+            cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
+        )
+        new_module.debug_print = debug_print
+        return new_module
+
+    @classmethod
+    def get_func_name(cls, any_callable):
+        if isinstance(any_callable, partial):
+            return any_callable.func.__name__
+        return any_callable.__name__
+
+    def __repr__(self):
+        return (
+            f'StatFakeQuantLinear(in_features={self.in_features},'
+            f'out_features={self.out_features},'
+            f'bias={self.bias is not None},'
+            f'weight_quant={self.w_qdq_name},'
+            f'act_quant={self.a_qdq_name},'
+            f'online_rotate={self.buf_rotate},'
+            f'fp8_forward={self.fp8_forward},'
+            f'debug_print={self.debug_print})'
+        )
 
 class VllmRealQuantLinear(nn.Module):
     def __init__(self, weight, bias, scales, input_scale, need_pack, scales_name):

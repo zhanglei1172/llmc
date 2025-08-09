@@ -14,7 +14,7 @@ class PerplexityEval(BaseEval):
     @torch.no_grad()
     def eval_func(self, model, testenc, seq_len, bs, eval_pos):
         testenc = testenc.input_ids
-        nsamples = testenc.numel() // seq_len
+        nsamples = self.num_samples if self.num_samples else testenc.numel() // seq_len 
 
         nlls = []
 

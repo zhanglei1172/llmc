@@ -17,7 +17,8 @@ from llmc.eval import (
     MSEEval,
 )
 from llmc.utils import deploy_all_modality
-
+from llmc.compression.quantization.module_utils import StatFakeQuantLinear
+from llmc.compression.quantization.measure import MeasurePrinter
 
 def get_eval_list(model, config):
     eval_list = []
@@ -102,6 +103,12 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                 deploy_all_modality(blockwise_opts, "origin_float")
             elif eval_pos in ["fake_quant", "fake_quant_wo_kv"]:
                 deploy_all_modality(blockwise_opts, "fake_quant")
+            elif eval_pos in ["stat_fake_quant_qdq", "stat_fake_quant_graph"]:
+                deploy_all_modality(blockwise_opts, "stat_fake_quant")
+                if eval_pos == "stat_fake_quant_graph":
+                    for name, module in model.model.named_modules():
+                        if type(module) == StatFakeQuantLinear:
+                            module.graph_stat_step[0] = 1
             for eval_class, config_for_eval in eval_list:
                 if eval_pos in config_for_eval.eval.eval_pos:
                     res = eval_class.eval(model, eval_pos)
@@ -109,4 +116,54 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                     dataset_name = config_for_eval.eval.name
                     logger.info(f"EVAL: {eval_name} on {dataset_name} is {res}")
                     ret[eval_pos][dataset_name] = res
+            if eval_pos == "stat_fake_quant_qdq":
+                recorders_qdq_w = {}
+                recorders_qdq_a = {}
+                recorders_qdq_o = {}
+                for name, module in model.model.named_modules():
+                    if type(module) == StatFakeQuantLinear:
+                        if module.recorder_qdq_a.num_of_elements > 0:
+                            recorders_qdq_a[name] = module.recorder_qdq_a.measure
+                        if module.recorder_qdq_w.num_of_elements > 0:
+                            recorders_qdq_w[name] = module.recorder_qdq_w.measure
+                        if module.recorder_qdq_o.num_of_elements > 0:
+                            recorders_qdq_o[name] = module.recorder_qdq_o.measure
+                print("="*10 + "OP analysis (Act Input)" + "="*10)
+                print_debug_info(recorders_qdq_a)
+                print("="*10 + "OP analysis (Weight)" + "="*10)
+                print_debug_info(recorders_qdq_w)
+                print("="*10 + "OP analysis (Act Output)" + "="*10)
+                print_debug_info(recorders_qdq_o)
+        
+            if eval_pos == "stat_fake_quant_graph":
+                for name, module in model.model.named_modules():
+                    if type(module) == StatFakeQuantLinear:
+                        module.graph_stat_step[0] = 2
+                for eval_class, config_for_eval in eval_list:
+                    if eval_pos in config_for_eval.eval.eval_pos:
+                        res = eval_class.eval(model, eval_pos)
+                        eval_name = config_for_eval.eval.type
+                        dataset_name = config_for_eval.eval.name
+                recorders = {}
+                for name, module in model.model.named_modules():
+                    if type(module) == StatFakeQuantLinear:
+                        recorders[name] = module.recorder_graph.measure
+                print("="*10 + "Graph analysis" + "="*10)
+                print_debug_info(recorders)
     return ret
+
+def print_debug_info(recorders, method="cosine"):
+    if recorders:
+        method_str = "MEASUREMENT"
+        if method == "snr":
+            method_str = "NOISE:SIGNAL POWER RATIO"
+        if method == "cosine":
+            method_str = "COSINE SIMILARITY"
+        if method == "mse":
+            method_str = "MSE LOSS(UNSCALED)"
+        MeasurePrinter(
+                    recorders,
+                    order="large_to_small",
+                    measure=method_str,
+                    percentage=method in {"snr", "cosine"},
+                ).print()

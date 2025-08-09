@@ -30,7 +30,7 @@ eval:
         download: False
         path: /workspace/lim42@xiaopeng.com/dataset/mme/
         bs: 1
-        limit: -100  # Limit test num for evaluation
+        limit: 200  # Limit test num for evaluation
         inference_per_block: False
         
     # - 

@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_gptq/fake_quant_model/ 
+    path: input_path 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -107,4 +107,4 @@ quant:
 # save:
 #     # save_trans: True
 #     save_fake: True
-#     save_path: /code/rtn_w4afp16_spinquant_gptq 
+#     save_path: out_path 

@@ -38,7 +38,8 @@ from .module_utils import (_LLMC_LINEAR_TYPES_, _LLMC_LN_TYPES_,
                            _TRANSFORMERS_LN_TYPES_, EffcientFakeQuantLinear,
                            FakeQuantLinear, LlmcActFn, OriginFloatLinear,
                            RotateLinear,
-                           RotateLinear2)
+                           RotateLinear2,
+                           StatFakeQuantLinear)
 from .quant import FloatQuantizer, IntegerQuantizer, Weight48IntegerQuantizer
 
 
@@ -87,7 +88,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
 
     def get_replacement_params(self, mode='fake_quant', w_only=False, name=None, args={}):
         params_dict = {}
-        if mode in ['fake_quant', 'fake_quant_wo_kv']:
+        if mode in ['fake_quant', 'fake_quant_wo_kv', 'stat_fake_quant']:
             params_dict['a_qdq'] = (
                 partial(self.a_qdq, aquantizer=self.aquantizer)
                 if not w_only
@@ -1044,6 +1045,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             'origin_float': OriginFloatLinear,
             'fake_quant': EffcientFakeQuantLinear,
             'fake_quant_wo_kv': EffcientFakeQuantLinear,
+            'stat_fake_quant': StatFakeQuantLinear,
         }
         module_mapping.update(_REALQUANT_LINEAR_MAP_)
 
