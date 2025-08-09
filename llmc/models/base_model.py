@@ -26,6 +26,7 @@ from llmc.compression.quantization.module_utils import (
 class BaseModel(metaclass=ABCMeta):
     def __init__(self, config, device_map=None, use_cache=False):
         self.config = config
+        self.processor = None
         self.model_type = self.config.model.type
         self.model_path = self.config.model.path
         self.tokenizer_mode = self.config.model.get('tokenizer_mode', 'fast')
@@ -504,3 +505,6 @@ class BaseModel(metaclass=ABCMeta):
     def convert_dtype(self, dtype='torch.float16'):
         for i in range(len(self.blocks)):
             self.blocks[i] = self.blocks[i].to(dtype)
+
+    def before_save_model(self):
+        pass

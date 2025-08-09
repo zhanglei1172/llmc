@@ -909,7 +909,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         init_shape = weight.shape
         R_b = bias
 
-        W = weight.data.to(device=dev, dtype=torch.float64).reshape(
+        W = weight.to(device=dev, dtype=torch.float64).reshape(
             (Q.shape[0], -1) if transpose else (-1, Q.shape[0])
         )
         Q = Q.to(device=dev, dtype=torch.float64)
@@ -918,7 +918,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         else:
             R_W = torch.matmul(Q.T, W).to(device=ROTATE_DEV, dtype=dtype)
             if bias is not None:
-                b = bias.data.to(device=dev, dtype=torch.float64)
+                b = bias.to(device=dev, dtype=torch.float64)
                 R_b = torch.matmul(Q.T, b).to(device=ROTATE_DEV, dtype=dtype)
 
         return R_W.reshape(init_shape), R_b
@@ -1123,6 +1123,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         if int(os.environ['RANK']) != 0:
             return
         self.contiguous_params()
+        self.model.before_save_model()
         if self.config.model.type in ['Llava', 'InternVL2', 'Mllama', 'Qwen2vl']:
             self.model.vlm_model.language_model = self.model.get_model()
             self.model.vlm_model.save_pretrained(path)

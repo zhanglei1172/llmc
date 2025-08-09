@@ -17,7 +17,7 @@ from transformers import (LlamaTokenizerFast, Trainer, TrainingArguments,
 from llmc.compression.quantization import *
 from llmc.compression.sparsification import *
 from llmc.compression.token_reduction import *
-from llmc.data import BaseDataset, BaseTokenizer, TrainJsonDataset
+from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
 from llmc.eval.utils import eval_model, get_eval_list
 from llmc.eval import PerplexityEval
 from llmc.models import *
@@ -69,8 +69,8 @@ def main(config):
             blockwise_opts.append(blockwise_opt)
             dist.barrier()
         else:
-            dataset = BaseDataset(
-                model.get_tokenizer(), config.calib, model.batch_process
+            dataset = MixDataset(
+                model.get_tokenizer(), config.calib, model.batch_process, model.processor
             )
             calib_data, padding_mask = dataset.get_calib_dataset()
             model.collect_first_block_input(calib_data, padding_mask)
@@ -97,12 +97,12 @@ def main(config):
             ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
             llmc_model_to_train.model.config.use_cache = False
 
-            dataset = BaseDataset(tokenizer.get_tokenizer(), config.train.data)
-
+            dataset = MixDataset(tokenizer.get_tokenizer(), config.train.data, llmc_model_to_train.batch_process, llmc_model_to_train.processor)
+            model_max_length=config.train.data[0].seq_len if isinstance(config.train.data, list) else config.train.data.seq_len
             train_tokenizer = AutoTokenizer.from_pretrained(
                 pretrained_model_name_or_path=config.model.path,
-                cache_dir=config.train.data.cache_dir,
-                model_max_length=config.train.data.seq_len,
+                cache_dir=config.train.data[0].cache_dir if isinstance(config.train.data, list) else config.train.data.cache_dir,
+                model_max_length=model_max_length,
                 padding_side='right',
                 use_fast=True,
                 add_eos_token=False,
@@ -126,14 +126,14 @@ def main(config):
             #         eval_list.append(ppl_eval)
 
             train_data = TrainJsonDataset(
-                dataset.calib_dataset,
+                dataset.get_raw_calib_dataset(),
                 train_tokenizer,
-                block_size=config.train.data.seq_len,
+                block_size=model_max_length,
             )
 
             train_args = TrainingArguments(**config.train.train_args)
             trainable_parameters = blockwise_opt.get_trainable_params(llmc_model_to_train)
-            llmc_model_to_train.model.seqlen = config.train.data.seq_len
+            llmc_model_to_train.model.seqlen = model_max_length
             optimizer = SGDG(trainable_parameters, lr=config.train.train_args.learning_rate, stiefel=True)
             FSDPTrainer._optimizer = optimizer
             trainer = FSDPTrainer(

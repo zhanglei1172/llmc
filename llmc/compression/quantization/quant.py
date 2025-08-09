@@ -160,7 +160,8 @@ class BaseQuantizer(object):
                 max_val[b_num * bs : (b_num + 1) * bs, :],
             )
 
-            best = torch.full([_tensor.shape[0]], float('inf'), device=dev)
+            # best = torch.full([_tensor.shape[0]], float('inf'), device=dev)
+            best = torch.full(list(_tensor.shape[:-1]) + [1], float('inf'), device=dev)
 
             best_min_val, best_max_val = _min_val, _max_val
 
@@ -186,7 +187,7 @@ class BaseQuantizer(object):
                 q_tensor -= _tensor
                 q_tensor.abs_()
                 q_tensor.pow_(norm)
-                err = torch.sum(q_tensor, 1)
+                err = torch.sum(q_tensor, -1, keepdim=True)
 
                 tmp = err < best
 
