@@ -34,9 +34,9 @@ quant:
         rotate_mode: hadamard
         fp32_had: True
         online_rotate: False
-ignored_layers:
-    block_ids: [0-28]
-    layer_names: ["mlp.down_proj"]
+# ignored_layers:
+#     block_ids: [0-28]
+#     layer_names: ["mlp.down_proj"]
 train:
     data:
         name: wikitext2
