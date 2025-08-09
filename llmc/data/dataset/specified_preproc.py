@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import numpy as np
 
 import torch
 
@@ -166,4 +167,30 @@ def txt_general_preproc(calib_dataset, tokenizer, n_samples, seq_len, key):
         n_run += 1
         if n_run == n_samples:
             break
+    return samples
+
+@PREPROC_REGISTRY
+def v4_general_preproc(processor, tokenizer, n_samples, seq_len, task_clss, data_path, calib_dataset=None, **kwargs):
+    import torch
+    model = torch.nn.Identity()
+    task = task_clss(model=model,processor=processor, max_length=seq_len, **kwargs)
+    dataset = task.load_dataset(data_path)
+    rng = np.random.RandomState(42)
+    idxs = rng.permutation(len(dataset))
+    samples = []
+    n_run = 0
+    for idx in idxs:
+        item = dataset[idx]
+        # try:
+            # 生成模型输入
+        inputs = task.prepare_inputs(item)
+        line_encoded = inputs['input_ids']
+        if seq_len and line_encoded.shape[1] < seq_len:
+            continue
+        samples.append(inputs)
+        n_run += 1
+        if n_run == n_samples:
+            break
+        # except Exception as e:
+            # print(f"Error processing item: {e}")
     return samples

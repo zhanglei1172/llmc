@@ -230,9 +230,9 @@ class SpinQuant(BaseBlockwiseQuantization):
             for name, module in block.named_modules():
                 if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
-                    module.weight.data = weight
+                    module.weight.data = weight.data
                     if bias is not None:
-                        module.bias.data = bias
+                        module.bias.data = bias.data
             block.cpu()
             logger.info(f'End apply {idx}-th block rotate weights')
 
@@ -242,7 +242,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(embedding_layer, RotateEmbedding):
             embedding_layer.cuda()
             weight = embedding_layer._rotate_weight()
-            embedding_layer.weight.data = weight
+            embedding_layer.weight.data = weight.data
             embedding_layer_name = get_module_name(self.model.model, embedding_layer)
             self.model.replace_module_subset(
                 OriginEmbedding,
@@ -258,9 +258,9 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(lm_head_layer, RotateLinear2):
             lm_head_layer.cuda()
             weight, bias = lm_head_layer._rotate_weight()
-            lm_head_layer.weight.data = weight
+            lm_head_layer.weight.data = weight.data
             if bias is not None:
-                lm_head_layer.bias.data = bias
+                lm_head_layer.bias.data = bias.data
             # lm_head_layer.weight, lm_head_layer.bias = weight, bias
             lm_head_layer_name = get_module_name(self.model.model, lm_head_layer)
             self.model.replace_module_subset(
@@ -277,9 +277,9 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(vision_up_proj, RotateLinear2):
             vision_up_proj.cuda()
             weight, bias = vision_up_proj._rotate_weight()
-            vision_up_proj.weight.data = weight
+            vision_up_proj.weight.data = weight.data
             if bias is not None:
-                vision_up_proj.bias.data = bias
+                vision_up_proj.bias.data = bias.data
             vision_up_proj_name = get_module_name(self.model.model, vision_up_proj)
             self.model.replace_module_subset(
                 OriginFloatLinear,
@@ -293,9 +293,9 @@ class SpinQuant(BaseBlockwiseQuantization):
         if isinstance(vision_embed, RotateConv3d):
             vision_embed.cuda()
             weight, bias = vision_embed._rotate_weight()
-            vision_embed.weight.data = weight
+            vision_embed.weight.data = weight.data
             if bias is not None:
-                vision_embed.bias.data = bias
+                vision_embed.bias.data = bias.data
             vision_embed_name = get_module_name(self.model.model, vision_embed)
             self.model.replace_module_subset(
                 OriginFloatConv3d,
@@ -391,9 +391,9 @@ class SpinQuant(BaseBlockwiseQuantization):
                 module = self.model.model.get_submodule(module_name)
                 if isinstance(module, (RotateLinear2, RotateFakeQuantLinear)):
                     weight, bias = module._rotate_weight()
-                    module.weight.data = weight
+                    module.weight.data = weight.data
                     if bias is not None:
-                        module.bias.data = bias
+                        module.bias.data = bias.data
                     # module.weight, module.bias = weight, bias
                 self.model.replace_module_subset(
                     OriginFloatLinear,

@@ -13,6 +13,7 @@ from llmc.eval import (
     KLDivergenceEval,
     VideoGenerateEval,
     VQAEval,
+    V4Eval,
     MSEEval,
 )
 from llmc.utils import deploy_all_modality
@@ -59,6 +60,8 @@ def get_eval_list(model, config):
                             eval_class = AccuracyEval(config_for_eval)
                         elif config_tmp.eval.type == "vqa":
                             eval_class = VQAEval(config_for_eval)
+                        elif config_tmp.eval.type == "v4":
+                            eval_class = V4Eval(config_for_eval)
                         elif (
                             config_tmp.eval.type == "code"
                             and config_tmp.eval.name == "human_eval"

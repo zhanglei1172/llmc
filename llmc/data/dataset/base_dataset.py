@@ -2,6 +2,7 @@ import json
 import os
 from abc import ABCMeta
 import random
+import functools
 
 import torch
 from datasets import load_dataset, load_from_disk
@@ -13,11 +14,12 @@ from .specified_preproc import PREPROC_REGISTRY
 
 
 class BaseDataset(metaclass=ABCMeta):
-    def __init__(self, tokenizer, calib_cfg, batch_process=None):
+    def __init__(self, tokenizer, calib_cfg, batch_process=None, processor=None):
         # calib_cfg
         logger.info(f'calib_cfg : {calib_cfg}')
         self.tokenizer = tokenizer
         self.batch_process = batch_process
+        self.processor = processor
         self.calib_dataset_name = calib_cfg['name']
         self.padding = calib_cfg.get('padding', False)
         if self.calib_dataset_name == 'ultrachat':
@@ -37,6 +39,7 @@ class BaseDataset(metaclass=ABCMeta):
         if self.preproc == 'original_txt':
             assert self.seq_len is None
         self.seed = calib_cfg['seed']
+        self.special_config = calib_cfg.get('special', {})
         self.calib_dataset_field_map = {
             'pileval': 'text',
             'c4': 'text',
@@ -74,7 +77,15 @@ class BaseDataset(metaclass=ABCMeta):
             else:
                 raise Exception(f'Not support {self.calib_dataset_name} dataset.')
         else:
-            if self.calib_dataset_name in [
+            if self.calib_dataset_name.startswith('V4_'):
+                try:
+                    from xq_eval.task_utils import TASK2EVAL
+                except Exception as e:
+                    logger.error(f'Plese make sure git submodule updated!')
+                    raise e
+                self.task_clss = TASK2EVAL[self.calib_dataset_name.strip('V4_')]
+                self.calib_dataset = None
+            elif self.calib_dataset_name in [
                 'custom_txt',
                 'custom_mm',
                 'images',
@@ -111,6 +122,14 @@ class BaseDataset(metaclass=ABCMeta):
                 }
                 if self.preproc == 'txt_general_preproc':
                     preproc_param_dict['key'] = self.key
+                elif self.preproc == 'v4_general_preproc':
+                    preproc_param_dict['task_clss'] = self.task_clss
+                    preproc_param_dict['processor'] = self.processor
+                    preproc_param_dict['generation_config'] = None
+                    preproc_param_dict['data_path'] = self.calib_dataset_path
+                    if self.special_config:
+                        preproc_param_dict.update(self.special_config)
+                    return preproc(**preproc_param_dict)
                 samples = preproc(**preproc_param_dict)
                 calib_model_inputs = []
                 if self.calib_bs == -1:
@@ -170,11 +189,13 @@ class BaseDataset(metaclass=ABCMeta):
         return calib_model_inputs
 
     def get_calib_dataset(self):
-        samples = self.calib_dataset[
-            int(os.environ['RANK'])::int(os.environ['WORLD_SIZE'])
-        ]
-        logger.info(f'len(samples) rank : {len(samples)}')
-
+        if self.calib_dataset is not None:
+            samples = self.calib_dataset[
+                int(os.environ['RANK'])::int(os.environ['WORLD_SIZE'])
+            ]
+            logger.info(f'len(samples) rank : {len(samples)}')
+        else:
+            samples = None
         calib_model_inputs = self.get_calib_model_inputs(samples)
         logger.info(f'len(calib_model_inputs) : {len(calib_model_inputs)}')
         if self.padding:
@@ -240,3 +261,43 @@ class BaseDataset(metaclass=ABCMeta):
             if 'negative_prompt' not in custom_data_samples[idx]:
                 custom_data_samples[idx]['negative_prompt'] = ''
         return custom_data_samples
+
+class MixDataset(BaseDataset):
+    def __init__(self, tokenizer, calib_cfg, batch_process=None, processor=None):
+        if isinstance(calib_cfg, dict):
+            calib_cfg = [calib_cfg]
+        self.datasets = []
+        for cfg in calib_cfg:
+            dataset = BaseDataset(tokenizer, cfg, batch_process, processor)
+            self.datasets.append(dataset)
+    
+    def get_calib_dataset(self):
+        calib_model_inputs = []
+        padding_mask = []
+        for dataset in self.datasets:
+            inputs, masks = dataset.get_calib_dataset()
+            calib_model_inputs.extend(inputs)
+            if masks is not None:
+                padding_mask.extend(masks)
+        if padding_mask:
+            assert len(calib_model_inputs) == len(padding_mask), \
+                "The length of calib_model_inputs and padding_mask must be the same."
+        else:
+            padding_mask = None
+        if len(calib_model_inputs) == 0:
+            raise ValueError("No samples found in the mixed datasets.")
+        logger.info(f'len(calib_model_inputs) : {len(calib_model_inputs)}')
+        return calib_model_inputs, padding_mask
+
+    def get_raw_calib_dataset(self):
+        raw_calib_model_inputs = []
+        for dataset in self.datasets:
+            raw_inputs = dataset.calib_dataset
+            if raw_inputs is not None:
+                raw_calib_model_inputs.extend(raw_inputs)
+            else:
+                calib_model_inputs = dataset.get_calib_model_inputs(None)
+                raw_calib_model_inputs.extend(calib_model_inputs)
+        if len(raw_calib_model_inputs) == 0:
+            raise ValueError("No samples found in the mixed datasets.")
+        return raw_calib_model_inputs

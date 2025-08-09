@@ -1,0 +1,99 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    path: /code/llmc_test/work/out_v4_spinquant_gptq/transformed_model/
+    torch_dtype: torch.bfloat16
+# calib:
+#     # name: pileval
+#     name: V4_mmmu
+#     download: False
+#     # path: /workspace/zhangl98@xiaopeng.com/dataset/calib/pileval
+#     path: /workspace/gaoy25@xiaopeng.com/v4_datas/test_acc_v4/datasets_v4/mmmu_val_98_test_368length.json
+#     n_samples: 512
+#     bs: 1
+#     # seq_len: 512
+#     seq_len: 2048
+#     # preproc: txt_general_preproc
+#     preproc: v4_general_preproc
+#     seed: *seed
+#     # special:
+#     #     sptk_map_path: /workspace/zhangl98@xiaopeng.com/code/Xmart-LLMC/xq_eval/datasets_v4/V15_DEMO.sptk_map.json
+calib:
+    -
+        name: V4_mmmu
+        download: False
+        path: /workspace/gaoy25@xiaopeng.com/v4_datas/test_acc_v4/datasets_v4/mmmu_val_98_test_368length.json
+        n_samples: 512
+        bs: 1
+        seq_len: 2048
+        preproc: v4_general_preproc
+        seed: *seed
+    - 
+        name: V4_decision
+        download: False
+        path: /workspace/zhangl98@xiaopeng.com/code/Xmart-LLMC/xq_eval/datasets_v4/V15_all.json
+        n_samples: 512
+        bs: 1
+        seq_len: 
+        preproc: v4_general_preproc
+        seed: *seed
+        special:
+            sptk_map_path: /workspace/zhangl98@xiaopeng.com/code/Xmart-LLMC/xq_eval/datasets_v4/V15_DEMO.sptk_map.json
+    - 
+        name: V4_feedback
+        download: False
+        path: /workspace/gaoy25@xiaopeng.com/v4_datas/test_acc_v4/datasets_v4/val_memory_v3_002.json
+        n_samples: 512
+        bs: 1
+        seq_len: 2048
+        preproc: v4_general_preproc
+        seed: *seed
+    - 
+        name: V4_oms
+        download: False
+        path: /workspace/gaoy25@xiaopeng.com/v4_datas/test_acc_v4/datasets_v4/test_v2_6_mixed_refined_0617v6-相对坐标-right-560px.json
+        n_samples: 512
+        bs: 1
+        seq_len: 2048
+        preproc: v4_general_preproc
+        seed: *seed
+    - 
+        name: V4_alpaca
+        download: False
+        path: /workspace/gaoy25@xiaopeng.com/v4_datas/test_acc_v4/datasets_v4/alpaca_zh_data_100_test.json
+        n_samples: 512
+        bs: 1
+        seq_len: 2048
+        preproc: v4_general_preproc
+        seed: *seed
+eval:
+    eval_pos: [transformed, fake_quant]
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+    # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+    bs: 1
+    inference_per_block: False
+quant:
+    method: SmoothQuantCustom
+    weight:
+        bit: 8
+        symmetric: True
+        granularity: per_channel
+    act:
+        granularity: per_token
+        static: False
+        # calib_algo: static_minmax
+        bit: 8
+        symmetric: True
+        # granularity: per_token
+    special:
+        alpha: 0.8
+        selected_layers: ["mlp.down_proj"]
+save:
+    save_trans: True
+    save_fake: True
+    save_path: /code/llmc_test/work/out_v4_spinquant_gptq_smoothquant2

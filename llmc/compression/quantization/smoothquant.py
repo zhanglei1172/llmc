@@ -17,6 +17,7 @@ class SmoothQuant(BaseBlockwiseQuantization):
         special_config = self.quant_config.get('special', {})
         self.alpha = special_config.get('alpha', 0.5)
         self.selected_layers = special_config.get('selected_layers', None)
+        self.had_dim = self.hidden_size // self.num_heads
 
     @torch.no_grad()
     def filter_subset(self, prev_op):
@@ -52,9 +53,12 @@ class SmoothQuant(BaseBlockwiseQuantization):
         return scale_max
 
     @torch.no_grad()
-    def search_scale_subset(self, layers, tensors):
+    def search_scale_subset(self, layers, tensors, is_gqa=False):
         w_max = self.get_weight_scale(layers)
         x_max = self.get_act_scale(tensors)
+        if is_gqa:
+            w_max = w_max.reshape(-1, self.num_key_value_groups, self.had_dim).max(dim=1)[0]
+            x_max = x_max.reshape(-1, self.num_key_value_groups, self.had_dim).max(dim=1)[0]
         x_max = x_max.to(dtype=w_max.dtype, device=w_max.device)
         scale = (x_max.pow(self.alpha) / w_max.pow(1 - self.alpha)).clamp(min=1e-5)
         return scale

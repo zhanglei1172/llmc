@@ -1,0 +1,65 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    path: /workspace/gaoy25@xiaopeng.com/v4_datas/v4_ckpts/tmp_0624/v11-20250723-164348/
+    torch_dtype: torch.float32
+calib:
+    name: pileval
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/calib/pileval
+    n_samples: 128
+    bs: 128
+    seq_len: 512
+    preproc: txt_general_preproc
+    seed: *seed
+eval:
+  - eval_pos: [transformed,fake_quant]
+    name: wikitext2
+    type: ppl
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    bs: 1
+    inference_per_block: False
+#   - eval_pos: [pretrain,transformed,fake_quant]
+#     type: vqa
+#     name: [mmmu]
+#     download: False
+#     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+#     bs: 1
+#     limit: 200  # Limit test num for evaluation
+#     inference_per_block: False
+quant:
+    method: Awq
+    weight:
+        bit: 4
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+        calib_algo: minmax
+    act:
+        granularity: per_tensor
+        static: True
+        calib_algo: static_minmax
+        # calib_algo: minmax
+        bit: 16
+        symmetric: True
+        # granularity: per_token
+    special:
+        trans: True
+        trans_version: v1
+        weight_clip: False 
+        clip_sym: True
+        # For weight-only AWQ+Omni mode, there's no need to save scale factors;
+        # Only the AWQ-transformed model needs to be saved.
+        save_scale: False
+        save_clip: False
+        save_mem: False
+        # selected_layers: ["self_attn.q_proj", "self_attn.o_proj", "mlp.down_proj"] #["mlp.down_proj"]
+        do_gqa_trans: True
+
+# save:
+#     save_trans: True
+#     # save_fake: True
+#     save_path: /code/llmc_test/work/out_v4_test/v4-0624/w4a16/spinquant_awq
