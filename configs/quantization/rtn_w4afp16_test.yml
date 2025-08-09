@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: input_path 
+    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_smCalib/transformed_model/ 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -29,7 +29,7 @@ eval:
         type: v4
         name: V4_decision
         download: False
-        path: ./xq_eval/datasets_v4/V15_all.json
+        path: ./xq_eval/datasets_v4/V15_all_new.json
         limit: -1
         bs: 1
         seq_len: 2048
@@ -66,6 +66,16 @@ eval:
         bs: 1
         seq_len: 2048
         seed: *seed
+    # - 
+    #     eval_pos: [fake_quant]
+    #     type: v4
+    #     name: vqa
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/test_data_yans2_v7_no_intersection_normalized_v3_198.json
+    #     limit: -1
+    #     bs: 1
+    #     seq_len: 2048
+    #     seed: *seed
 # ignored_layers:
 #     block_ids: [0-28]
 #     layer_names: ["mlp.down_proj"]
@@ -97,4 +107,4 @@ quant:
 # save:
 #     # save_trans: True
 #     save_fake: True
-#     save_path: out_path 
+#     save_path: /code/rtn_w4afp16_spinquant_smCalib 

@@ -13,18 +13,18 @@ flag="$(basename "$(dirname "$model_path")"/)"
 # prec=w8a8 # w8a8 w4a8 w4a16
 
 ####
-precs=('w8a8' 'w4afp16')
+precs=('w4afp16' 'w8a8')
 for prec in ${precs[@]}
 do
-    echo ./log/log_v4-rtn_0807-${prec}_${flag}_.log
+    echo ./log/test/log_v4-rtn_0807-${prec}_${flag}_.log
     sed -E -i "s#path: .* #path: ${model_path} #"  configs/quantization/rtn_${prec}_test.yml
     sed -E -i "s#save_path: .* #save_path: /code/rtn_${prec}_${flag} #"  configs/quantization/rtn_${prec}_test.yml
 
-    PYTHONPATH='.' llmc=./llmc ${python_path} -m torch.distributed.run --nnode 1 --nproc_per_node 1 --rdzv_id $1 --rdzv_backend c10d --rdzv_endpoint localhost:1$1 ./llmc/__main__.py --config configs/quantization/rtn_${prec}_test.yml --task_id $1  > ./log/log_v4-rtn_0807-${prec}_${flag}_.log 2>&1
+    PYTHONPATH='.' llmc=./llmc ${python_path} -m torch.distributed.run --nnode 1 --nproc_per_node 1 --rdzv_id $1 --rdzv_backend c10d --rdzv_endpoint localhost:1$1 ./llmc/__main__.py --config configs/quantization/rtn_${prec}_test.yml --task_id $1  > ./log/test/log_v4-rtn_0807-${prec}_${flag}_.log 2>&1
 
     sed -E -i "s#path: ${model_path} #path: input_path #"  configs/quantization/rtn_${prec}_test.yml
     sed -E -i "s#save_path: /code/rtn_${prec}_${flag} #save_path: out_path #"  configs/quantization/rtn_${prec}_test.yml
-    echo ./log/log_v4-rtn_0807-${prec}_${flag}_.log
+    echo ./log/test/log_v4-rtn_0807-${prec}_${flag}_.log
 
 done
 
