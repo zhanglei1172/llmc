@@ -46,7 +46,7 @@ eval:
     - 
         eval_pos: [fake_quant]
         type: v4
-        name: V4_decision
+        name: decision
         download: False
         path: ./xq_eval/datasets_v4/V15_all_new.json
         limit: -1

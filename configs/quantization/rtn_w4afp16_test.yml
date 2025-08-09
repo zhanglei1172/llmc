@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_smCalib/transformed_model/ 
+    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_gptq/fake_quant_model/ 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -27,7 +27,7 @@ eval:
     - 
         eval_pos: [fake_quant]
         type: v4
-        name: V4_decision
+        name: decision
         download: False
         path: ./xq_eval/datasets_v4/V15_all_new.json
         limit: -1
@@ -107,4 +107,4 @@ quant:
 # save:
 #     # save_trans: True
 #     save_fake: True
-#     save_path: /code/rtn_w4afp16_spinquant_smCalib 
+#     save_path: /code/rtn_w4afp16_spinquant_gptq 
