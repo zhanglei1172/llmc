@@ -14,7 +14,7 @@ calib:
     preproc: wikitext2_gptq
     seed: *seed
 eval:
-  - eval_pos: ["stat_fake_quant_subset", "stat_fake_quant_block"]
+  - eval_pos: ["stat_fake_quant_qdq", "stat_fake_quant_graph", "stat_fake_quant_subset", "stat_fake_quant_block"]
     name: wikitext2
     type: ppl
     download: False

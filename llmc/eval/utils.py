@@ -121,14 +121,15 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
             if eval_pos in config_for_eval.eval.eval_pos:
                 do_eval = True
 
-        def eval_func():
+        def eval_func(r=None):
             for eval_class, config_for_eval in eval_list:
                 if eval_pos in config_for_eval.eval.eval_pos:
                     res = eval_class.eval(model, eval_pos)
                     eval_name = config_for_eval.eval.type
                     dataset_name = config_for_eval.eval.name
                     logger.info(f"EVAL: {eval_name} on {dataset_name} is {res}")
-                    ret[eval_pos][dataset_name] = res
+                    if r:
+                        ret[eval_pos][dataset_name] = res
 
         def add_hook_for_interested_layers_step1(interested_output, interested_layers):
             def hook(model, input, output):
@@ -169,18 +170,19 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                     for name, module in quantable_modules.items():
                         quantable_modules[name] = module
                         module.graph_stat_step[0] = 1
-                        module.quant_status[1] = 1
+                        module.quant_status[0] = 1
                 elif eval_pos == "stat_fake_quant_qdq":
                     for name, module in quantable_modules.items():
                         quantable_modules[name] = module
                         module.op_stat_status[0] = 1
-                        module.quant_status[1] = 1
+                        module.quant_status[0] = 1
 
-            eval_func()
+            eval_func(ret)
             if eval_pos == "stat_fake_quant_qdq":
                 for name, module in quantable_modules.items():
                     quantable_modules[name] = module
                     module.op_stat_status[0] = 0
+                    module.quant_status[0] = 0
                 res_measure_qdq_w = {}
                 res_measure_qdq_a = {}
                 res_measure_qdq_o = {}
@@ -258,7 +260,9 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                         for name, module in block.named_modules():
                             if module in quantable_modules_set:
                                 module.quant_status[0] = 0
-                        res_measure[block_idx] = recorders[block_idx].measure
+                        res_measure["block_{}".format(block_idx)] = recorders[block_idx].measure
+                for name, module in quantable_modules.items():
+                    module.quant_status[0] = 0
                 print("="*10 + "Layerwise err analysis" + "="*10)
                 print_debug_info(res_measure)
     
