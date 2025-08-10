@@ -3,7 +3,7 @@ base:
 model:
     type: Qwen25VL_V4
     path: input_path 
-    torch_dtype: torch.float32
+    torch_dtype: torch.float16
 calib:
     name: wikitext2
     download: False
@@ -14,6 +14,16 @@ calib:
     preproc: wikitext2_gptq
     seed: *seed
 eval:
+    - 
+        eval_pos: [fake_quant]
+        type: v4
+        name: vqa
+        download: False
+        path: ./xq_eval/datasets_v4/test_data_yans2_v7_no_intersection_normalized_v3_198.json
+        limit: -1
+        bs: 1
+        seq_len: 1024
+        seed: *seed
     - 
         eval_pos: [fake_quant]
         type: v4

@@ -149,6 +149,63 @@ def torch_snr_error(
     else:
         raise ValueError(f"Unsupported reduction method.")
 
+def torch_kl_divergence(
+    y_pred: torch.Tensor,
+    y_real: torch.Tensor,
+    reduction: str = "mean",
+    flatten_start_dim=1,
+) -> torch.Tensor:
+    """
+    Compute Kullback-Leibler divergence between y_pred(tensor) and y_real(tensor)
+
+    KL divergence can be calculated as following equation:
+
+        KL(y_pred || y_real) = sum(y_pred * log(y_pred / y_real))
+
+    if x and y are matrices, KL divergence over matrix should be the mean value of KL divergence over all elements.
+
+        KL(X, Y) = mean(X * log(X / Y))
+
+    Args:
+        y_pred (torch.Tensor): _description_
+        y_real (torch.Tensor): _description_
+        reduction (str, optional): _description_. Defaults to 'mean'.
+
+    Raises:
+        ValueError: _description_
+        ValueError: _description_
+
+    Returns:
+        torch.Tensor: _description_
+    """
+    if y_pred.shape != y_real.shape:
+        raise ValueError(
+            f"Can not compute kl divergence for tensors with different shape. "
+            f"({y_pred.shape} and {y_real.shape})"
+        )
+    reduction = str(reduction).lower()
+
+    if y_pred.ndim == 1:
+        y_pred = y_pred.unsqueeze(0)
+        y_real = y_real.unsqueeze(0)
+
+    y_pred = y_pred.flatten(start_dim=flatten_start_dim)
+    y_real = y_real.flatten(start_dim=flatten_start_dim)
+
+    # kl = torch.sum(y_pred * torch.log(y_pred / (y_real + 1e-7)), dim=-1)
+    kl = torch.nn.functional.kl_div(
+        y_pred.log_softmax(dim=-1), y_real.softmax(dim=-1), reduction="none"
+    )
+
+    if reduction == "mean":
+        return torch.mean(kl)
+    elif reduction == "sum":
+        return torch.sum(kl)
+    elif reduction == "none":
+        return kl
+    else:
+        raise ValueError(f"Unsupported reduction method.")
+
 def numpy_cosine_similarity(x: ndarray, y: ndarray) -> ndarray:
     return dot(x, y) / (norm(x) * norm(y))
 
@@ -189,6 +246,10 @@ class MeasureRecorder:
             measure_fn = partial(
                 torch_snr_error, reduction=reduce, flatten_start_dim=flatten_start_dim
             )
+        elif str(measurement).lower() == "kl":
+            measure_fn = partial(
+                torch_kl_divergence, reduction=reduce, flatten_start_dim=flatten_start_dim
+            )
         else:
             raise ValueError(
                 "Unsupported measurement detected. "
@@ -205,7 +266,7 @@ class MeasureRecorder:
                 "Can not update measurement, cause your input data do not share a same batchsize. "
                 f"Shape of y_pred {y_pred.shape} - against shape of y_real {y_real.shape}"
             )
-        result = self.measure_fn(y_pred=y_pred, y_real=y_real).item()
+        result = self.measure_fn(y_pred=y_pred.float(), y_real=y_real.float()).item()
 
         if self.reduce == "mean":
             self.measure = self.measure * self.num_of_elements + result * elements

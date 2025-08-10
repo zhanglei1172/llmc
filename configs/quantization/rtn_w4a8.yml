@@ -23,15 +23,15 @@ eval:
         seq_len: 2048
         bs: 1
         inference_per_block: False
-    - 
-        eval_pos: [fake_quant]
-        type: vqa
-        name: [mmmu]
-        download: False
-        path: /workspace/lim42@xiaopeng.com/dataset/mme/
-        bs: 1
-        limit: 200  # Limit test num for evaluation
-        inference_per_block: False
+    # - 
+    #     eval_pos: [fake_quant]
+    #     type: vqa
+    #     name: [mmmu]
+    #     download: False
+    #     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+    #     bs: 1
+    #     limit: 200  # Limit test num for evaluation
+    #     inference_per_block: False
         
     # - 
     #     eval_pos: [fake_quant]
@@ -113,7 +113,7 @@ quant:
             bit: 8
             symmetric: True
             granularity: per_tensor
-# save:
-#     # save_trans: True
-#     save_fake: False
-#     save_path: /code/rtn_w4a8_spinquant_sm 
+save:
+    # save_trans: True
+    save_fake: False
+    save_path: /code/rtn_w4a8_spinquant_sm 

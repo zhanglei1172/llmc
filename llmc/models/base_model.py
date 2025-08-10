@@ -508,3 +508,10 @@ class BaseModel(metaclass=ABCMeta):
 
     def before_save_model(self):
         pass
+
+    def get_interested_layers(self) -> list:
+        return self.get_head_layers()
+
+    def get_quantable_subset_names(self):
+        return ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj',
+               'self_attn.o_proj', 'mlp.gate_proj', 'mlp.up_proj', 'mlp.down_proj']

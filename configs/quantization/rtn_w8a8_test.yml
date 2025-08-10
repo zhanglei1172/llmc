@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_gptq/fake_quant_model/ 
+    path: /dataset/workspace/zhangl98/v4-0807/w8a8/rtn_w8a8_spinquant_smCalib/fake_quant_model/ 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -14,6 +14,16 @@ calib:
     preproc: wikitext2_gptq
     seed: *seed
 eval:
+    - 
+        eval_pos: [fake_quant]
+        type: v4
+        name: vqa
+        download: False
+        path: ./xq_eval/datasets_v4/test_data_yans2_v7_no_intersection_normalized_v3_198.json
+        limit: -1
+        bs: 1
+        seq_len: 1024
+        seed: *seed
     - 
         eval_pos: [fake_quant]
         type: v4
@@ -76,9 +86,9 @@ eval:
     #     bs: 1
     #     seq_len: 2048
     #     seed: *seed
-# ignored_layers:
-#     block_ids: [0-28]
-#     layer_names: ["mlp.down_proj"]
+ignored_layers:
+    block_ids: [0-28]
+    layer_names: ["mlp.down_proj"]
 quant:
     # vision:
     #     method: RTN
@@ -107,4 +117,4 @@ quant:
 # save:
 #     # save_trans: True
 #     save_fake: True
-#     save_path: /code/rtn_w8a8_spinquant_gptq 
+#     save_path: /code/rtn_w8a8_rtn_w8a8_spinquant_smCalib 

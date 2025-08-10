@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from loguru import logger
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 
+from llmc.compression.quantization.constant import MEASUREMENT
+
 from .quant import FloatQuantizer
 from .utils import is_fp8_supported_gpu
 from .measure import MeasureRecorder
@@ -1294,12 +1296,12 @@ class EffcientFakeQuantLinear(nn.Module):
         )
 
 class StatFakeQuantLinear(nn.Module):
-    def __init__(self, bias, ori_module, w_qdq, a_qdq, measurement="cosine"):
+    def __init__(self, bias, ori_module, w_qdq, a_qdq, measurement=MEASUREMENT):
         super().__init__()
-        self.recorder_qdq_w = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
-        self.recorder_qdq_a = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
-        self.recorder_qdq_o = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
-        self.recorder_graph = MeasureRecorder(measurement=measurement, flatten_start_dim=1)
+        self.recorder_qdq_w = MeasureRecorder(measurement=measurement, flatten_start_dim=0)
+        self.recorder_qdq_a = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
+        self.recorder_qdq_o = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
+        self.recorder_graph = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
         self.tmp_qdq = []
         self.register_parameter('weight', nn.Parameter(ori_module.weight.data, requires_grad=False))
         if bias is not None:
@@ -1310,6 +1312,8 @@ class StatFakeQuantLinear(nn.Module):
         self.w_qdq = w_qdq
         self.step_cnt = 0
         self.register_buffer('graph_stat_step', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
+        self.register_buffer('op_stat_status', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
+        self.register_buffer('quant_status', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
 
         for name, buf in ori_module.named_buffers():
             if name.startswith('buf_'):
@@ -1341,18 +1345,24 @@ class StatFakeQuantLinear(nn.Module):
     def forward(self, x):
         if hasattr(self, 'buf_rotate') and self.buf_rotate:
             x = self.rotater.rotate(x)
-        ori_y = self.forward_func(x, self.weight)
         if self.graph_stat_step[0] == 0:
-            w_qdq = self.w_qdq(self)
-            if self.recorder_qdq_w.num_of_elements == 0:
+            if self.quant_status[0] == 1:
+                w_qdq = self.w_qdq(self)
+            else:
+                w_qdq = self.weight
+            if self.op_stat_status[0] == 1 and self.recorder_qdq_w.num_of_elements == 0:
                 self.recorder_qdq_w.update(y_pred=w_qdq, y_real=self.weight.data)
 
-            if self.a_qdq is not None:
+            if self.a_qdq is not None and self.quant_status[0] == 1:
                 x_qdq = self.a_qdq(x, self)
-                self.recorder_qdq_a.update(y_pred=x_qdq, y_real=x)
-                x = x_qdq
-            y = self.forward_func(x, w_qdq)
-            self.recorder_qdq_o.update(y_pred=y, y_real=ori_y)
+                if self.op_stat_status[0] == 1:
+                    self.recorder_qdq_a.update(y_pred=x_qdq, y_real=x)
+            else:
+                x_qdq = x
+            y = self.forward_func(x_qdq, w_qdq)
+            if self.op_stat_status[0] == 1:
+                ori_y = self.forward_func(x, self.weight)
+                self.recorder_qdq_o.update(y_pred=y, y_real=ori_y)
             return y
         elif self.graph_stat_step[0] == 1:
             w_qdq = self.w_qdq(self)
@@ -1362,6 +1372,7 @@ class StatFakeQuantLinear(nn.Module):
             self.tmp_qdq.append(y.cpu())
             return y
         elif self.graph_stat_step[0] == 2:
+            ori_y = self.forward_func(x, self.weight)
             self.recorder_graph.update(
                 y_pred=self.tmp_qdq[self.step_cnt].to(ori_y.device), y_real=ori_y,
             )

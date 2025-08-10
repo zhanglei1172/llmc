@@ -22,14 +22,14 @@ eval:
     seq_len: 2048
     bs: 1
     inference_per_block: False
-  - eval_pos: [fake_quant]
-    type: vqa
-    name: [mmmu]
-    download: False
-    path: /workspace/lim42@xiaopeng.com/dataset/mme/
-    bs: 1
-    limit: 200  # Limit test num for evaluation
-    inference_per_block: False
+#   - eval_pos: [fake_quant]
+#     type: vqa
+#     name: [mmmu]
+#     download: False
+#     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+#     bs: 1
+#     limit: 200  # Limit test num for evaluation
+#     inference_per_block: False
 # ignored_layers:
 #     block_ids: [0-28]
 #     layer_names: ["mlp.down_proj"]

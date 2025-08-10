@@ -1,3 +1,4 @@
+MEASUREMENT = "snr"
 ROTATE_DEV = None # None or 'cpu'
 
 def set_rotate_device(device):

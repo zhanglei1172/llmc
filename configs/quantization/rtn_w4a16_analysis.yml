@@ -8,13 +8,13 @@ calib:
     name: wikitext2
     download: False
     path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
-    n_samples: 512
-    bs: 32
+    n_samples: 16
+    bs: 16
     seq_len: 2048
     preproc: wikitext2_gptq
     seed: *seed
 eval:
-  - eval_pos: ["stat_fake_quant_qdq", "stat_fake_quant_graph"]
+  - eval_pos: ["stat_fake_quant_subset", "stat_fake_quant_block"]
     name: wikitext2
     type: ppl
     download: False
@@ -22,7 +22,7 @@ eval:
     seq_len: 2048
     bs: 1
     inference_per_block: False
-    num_samples: 10
+    num_samples: 2
 #   - eval_pos: ["stat_fake_quant_qdq", "stat_fake_quant_graph"]
 #     type: vqa
 #     name: [mmmu]
