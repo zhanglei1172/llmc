@@ -1298,7 +1298,7 @@ class EffcientFakeQuantLinear(nn.Module):
 class StatFakeQuantLinear(nn.Module):
     def __init__(self, bias, ori_module, w_qdq, a_qdq, measurement=MEASUREMENT):
         super().__init__()
-        self.recorder_qdq_w = MeasureRecorder(measurement=measurement, flatten_start_dim=0)
+        self.recorder_qdq_w = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
         self.recorder_qdq_a = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
         self.recorder_qdq_o = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
         self.recorder_graph = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
@@ -1347,7 +1347,11 @@ class StatFakeQuantLinear(nn.Module):
             x = self.rotater.rotate(x)
         if self.graph_stat_step[0] == 0:
             if self.quant_status[0] == 1:
-                w_qdq = self.w_qdq(self)
+                if hasattr(self, "buf_weight"):
+                    w_qdq = self.buf_weight
+                else:
+                    w_qdq = self.w_qdq(self)
+                    self.register_buffer('buf_weight', w_qdq.data)
             else:
                 w_qdq = self.weight
             if self.op_stat_status[0] == 1 and self.recorder_qdq_w.num_of_elements == 0:
@@ -1355,28 +1359,34 @@ class StatFakeQuantLinear(nn.Module):
 
             if self.a_qdq is not None and self.quant_status[0] == 1:
                 x_qdq = self.a_qdq(x, self)
-                if self.op_stat_status[0] == 1:
+                if self.op_stat_status[0] == 1 and x.shape[1] > 1:
                     self.recorder_qdq_a.update(y_pred=x_qdq, y_real=x)
             else:
                 x_qdq = x
             y = self.forward_func(x_qdq, w_qdq)
-            if self.op_stat_status[0] == 1:
+            if self.op_stat_status[0] == 1 and x.shape[1] > 1:
                 ori_y = self.forward_func(x, self.weight)
                 self.recorder_qdq_o.update(y_pred=y, y_real=ori_y)
             return y
         elif self.graph_stat_step[0] == 1:
-            w_qdq = self.w_qdq(self)
+            if hasattr(self, "buf_weight"):
+                w_qdq = self.buf_weight
+            else:
+                w_qdq = self.w_qdq(self)
+                self.register_buffer('buf_weight', w_qdq.data)
             if self.a_qdq is not None:
                 x = self.a_qdq(x, self)    
             y = self.forward_func(x, w_qdq)
-            self.tmp_qdq.append(y.cpu())
+            if x.shape[1] > 1: # TODO only stat prefill
+                self.tmp_qdq.append(y.cpu())
             return y
         elif self.graph_stat_step[0] == 2:
             ori_y = self.forward_func(x, self.weight)
-            self.recorder_graph.update(
-                y_pred=self.tmp_qdq[self.step_cnt].to(ori_y.device), y_real=ori_y,
-            )
-            self.step_cnt += 1
+            if self.step_cnt < len(self.tmp_qdq) and x.shape[1] > 1:
+                self.recorder_graph.update(
+                    y_pred=self.tmp_qdq[self.step_cnt].to(ori_y.device), y_real=ori_y,
+                )
+                self.step_cnt += 1
             return ori_y
 
     @classmethod

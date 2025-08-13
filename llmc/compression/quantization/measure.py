@@ -277,6 +277,11 @@ class MeasureRecorder:
             self.measure = max(self.measure, result)
             self.num_of_elements += elements
 
+    def clear(self):
+        self.num_of_elements = 0
+        self.measure = 0
+        
+
 class MeasurePrinter:
     """Helper class for print top-k record."""
 

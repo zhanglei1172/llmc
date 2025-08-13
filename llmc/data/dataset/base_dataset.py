@@ -129,7 +129,21 @@ class BaseDataset(metaclass=ABCMeta):
                     preproc_param_dict['data_path'] = self.calib_dataset_path
                     if self.special_config:
                         preproc_param_dict.update(self.special_config)
-                    return preproc(**preproc_param_dict)
+                    _samples = preproc(seed=self.seed, **preproc_param_dict)
+                    keys = _samples[0].keys()
+                    if self.calib_bs == -1:
+                        samples = {key: torch.cat([sample[key] for sample in _samples], dim=0) for key in keys}
+                    elif self.calib_bs == 1:
+                        samples = _samples
+                    elif self.calib_bs > 1:
+                        samples = []
+                        for i in range(0, len(_samples), self.calib_bs):
+                            start = i
+                            end = min(i + self.calib_bs, len(_samples))
+                            batch = _samples[start:end]
+                            batch = {key: torch.cat([sample[key] for sample in batch], dim=0) for key in keys}
+                            samples.append(batch)
+                    return samples
                 samples = preproc(**preproc_param_dict)
                 calib_model_inputs = []
                 if self.calib_bs == -1:

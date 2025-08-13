@@ -189,9 +189,17 @@ def main(config):
         if eval_res is not None:
             eval_ress.update(eval_res)
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant_wo_kv')
+        if eval_res is not None:
+            eval_ress.update(eval_res)
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='stat_fake_quant_qdq')
+        if eval_res is not None:
+            eval_ress.update(eval_res)
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='stat_fake_quant_graph')
+        if eval_res is not None:
+            eval_ress.update(eval_res)
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='stat_fake_quant_subset')
+        if eval_res is not None:
+            eval_ress.update(eval_res)
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='stat_fake_quant_block')
         if eval_res is not None:
             eval_ress.update(eval_res)

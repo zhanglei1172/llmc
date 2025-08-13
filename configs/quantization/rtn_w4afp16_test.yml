@@ -8,7 +8,7 @@ calib:
     name: wikitext2
     download: False
     path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
-    n_samples: 512
+    n_samples: 32
     bs: 32
     seq_len: 2048
     preproc: wikitext2_gptq
@@ -110,6 +110,7 @@ quant:
             granularity: per_channel
             group_size: -1
             calib_algo: mse
+            minmax_fix: True
         # act:
         #     bit: 16
         #     symmetric: True

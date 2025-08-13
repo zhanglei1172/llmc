@@ -1,5 +1,6 @@
 import gc
 import os
+import re
 
 import torch
 import torch.distributed as dist
@@ -35,7 +36,6 @@ class Awq(BaseBlockwiseQuantization):
         self.save_scale = special_config.get('save_scale', False)
         self.awq_bs = special_config.get('awq_bs', None)
         self.save_mem = special_config.get('save_mem', True)
-        self.selected_layers = special_config.get('selected_layers', None)
 
     @torch.no_grad()
     def scaling_weight(self, w, scales, is_gqa):
@@ -304,6 +304,11 @@ class Awq(BaseBlockwiseQuantization):
         subset_kwargs,
     ):
         layers_dict = subset['layers']
+        if self.selected_block_ids and self.block_idx not in self.selected_block_ids:
+            logger.info(
+                f'Skipping block {self.block_idx} as it is not in selected blocks.'
+            )
+            return
         prev_op = subset['prev_op']
         input_name = subset['input'][0]
         inspect_module = subset['inspect']

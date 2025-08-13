@@ -170,12 +170,13 @@ def txt_general_preproc(calib_dataset, tokenizer, n_samples, seq_len, key):
     return samples
 
 @PREPROC_REGISTRY
-def v4_general_preproc(processor, tokenizer, n_samples, seq_len, task_clss, data_path, calib_dataset=None, **kwargs):
+def v4_general_preproc(processor, tokenizer, n_samples, seq_len, task_clss, data_path, calib_dataset=None, seed=42, **kwargs):
     import torch
     model = torch.nn.Identity()
+    model.device = 'cuda'
     task = task_clss(model=model,processor=processor, max_length=seq_len, **kwargs)
     dataset = task.load_dataset(data_path)
-    rng = np.random.RandomState(42)
+    rng = np.random.RandomState(seed)
     idxs = rng.permutation(len(dataset))
     samples = []
     n_run = 0

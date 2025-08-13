@@ -269,6 +269,16 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 save_clip=self.save_clip,
                 padding_mask=self.padding_mask,
             )
+        self.selected_layers = special_config.get('selected_layers', None)
+        selected_blocks = special_config.get('selected_blocks', [])
+        self.selected_block_ids = []
+        for item in selected_blocks:
+            match = re.match(r'(\d+)-(\d+)', str(item))
+            if match:
+                start, end = int(match.group(1)), int(match.group(2))
+                self.selected_block_ids.extend(range(start, end + 1))
+            else:
+                self.selected_block_ids.append(int(item))
 
         # set transformation config
         self.save_scale = special_config.get('save_scale', False)

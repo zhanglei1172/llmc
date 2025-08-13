@@ -133,7 +133,8 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
 
         def add_hook_for_interested_layers_step1(interested_output, interested_layers):
             def hook(model, input, output):
-                interested_output[id(model)].append(output.cpu())
+                if output.shape[1] > 1:
+                    interested_output[id(model)].append(output.cpu())
             hooks = []
             for layer in interested_layers:
                 hooks.append(layer.register_forward_hook(hook))
@@ -142,6 +143,8 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
         def add_hook_for_interested_layers_step2(recorder, interested_output, interested_layers):
             def hook(model, input, output):
                 global global_step
+                if global_step >= len(interested_output[id(model)]) or output.shape[1] == 1:
+                    return
                 recorder.update(y_pred=output, y_real=interested_output[id(model)][global_step].to(output.device))
                 global_step += 1
             hooks = []
@@ -189,10 +192,13 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                 for name, module in quantable_modules.items():
                     if module.recorder_qdq_a.num_of_elements > 0:
                         res_measure_qdq_a[name] = module.recorder_qdq_a.measure
+                        module.recorder_qdq_a.clear()
                     if module.recorder_qdq_w.num_of_elements > 0:
                         res_measure_qdq_w[name] = module.recorder_qdq_w.measure
+                        module.recorder_qdq_w.clear()
                     if module.recorder_qdq_o.num_of_elements > 0:
                         res_measure_qdq_o[name] = module.recorder_qdq_o.measure
+                        module.recorder_qdq_o.clear()
                 print("="*10 + "OP analysis (Act Input)" + "="*10)
                 print_debug_info(res_measure_qdq_a)
                 print("="*10 + "OP analysis (Weight)" + "="*10)
@@ -204,15 +210,12 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
                 for name, module in quantable_modules.items():
                     module.graph_stat_step[0] = 2
                     module.quant_status[0] = 0
-                for eval_class, config_for_eval in eval_list:
-                    if eval_pos in config_for_eval.eval.eval_pos:
-                        res = eval_class.eval(model, eval_pos)
-                        eval_name = config_for_eval.eval.type
-                        dataset_name = config_for_eval.eval.name
+                eval_func()
                 res_measure = {}
                 for name, module in quantable_modules.items():
                     res_measure[name] = module.recorder_graph.measure
                     module.tmp_qdq = []
+                    module.step_cnt = 0
                     module.graph_stat_step[0] = 0
                     module.quant_status[0] = 0
                     
