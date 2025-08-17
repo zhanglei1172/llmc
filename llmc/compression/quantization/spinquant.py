@@ -367,7 +367,7 @@ class SpinQuant(BaseBlockwiseQuantization):
             else:
                 self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=True)
                 self.replace_rotate_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
-    
+
 
     def _get_block_Q2(self, block):
         if hasattr(block, 'self_attn') and hasattr(block.self_attn, 'Q2'):
@@ -507,7 +507,11 @@ class SpinQuant(BaseBlockwiseQuantization):
         # FSDPTrainer._optimizer = optimizer
         need_teacher = train_args.special.get("loss_type", 'origin') not in  ("origin", "DFT")
         if need_teacher:
+            _backup = self.config.model.path
+            if train_args.special.get("teacher_path"):
+                self.config.model.path = train_args.special.get("teacher_path")
             teacher_model = MODEL_REGISTRY[self.config.model.type](self.config).model
+            self.config.model.path = _backup
             teacher_model.eval()
             for param in teacher_model.parameters():
                 param.requires_grad = False

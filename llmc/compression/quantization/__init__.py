@@ -20,3 +20,4 @@ from .spinquant import SpinQuant
 from .spqr import SpQR
 from .tesseraq import TesseraQ
 from .prefixquant import PrefixQuant
+from .ostquant import OSTQuant

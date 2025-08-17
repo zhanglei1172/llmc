@@ -311,6 +311,7 @@ class MixDataset(BaseDataset):
                 raw_calib_model_inputs.extend(raw_inputs)
             else:
                 calib_model_inputs = dataset.get_calib_model_inputs(None)
+                # calib_model_inputs, masks = dataset.get_calib_dataset()
                 raw_calib_model_inputs.extend(calib_model_inputs)
         if len(raw_calib_model_inputs) == 0:
             raise ValueError("No samples found in the mixed datasets.")
