@@ -14,7 +14,7 @@ from llmc.utils.registry_factory import ALGO_REGISTRY
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .module_utils import (_LLMC_LN_TYPES_, _MODEL_LN_TYPES_PAIRS_,
                            FakeQuantLinear)
-from .train_utils import LossFunction, NativeScalerWithGradNormCount
+from .train_utils.train_utils import LossFunction, NativeScalerWithGradNormCount
 
 
 @ALGO_REGISTRY

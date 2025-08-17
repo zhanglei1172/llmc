@@ -19,7 +19,7 @@ from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .module_utils import (_LLMC_LINEAR_TYPES_, _LLMC_LN_TYPES_,
                            _MODEL_LN_TYPES_PAIRS_, _TRANSFORMERS_LINEAR_TYPES_,
                            FakeQuantLinear)
-from .train_utils import (LossFunction, NativeScalerWithGradNormCount,
+from .train_utils.train_utils import (LossFunction, NativeScalerWithGradNormCount,
                           TruncateFunction)
 
 

@@ -12,14 +12,12 @@ import yaml
 from easydict import EasyDict
 from loguru import logger
 from torch.distributed import destroy_process_group, init_process_group
-from transformers import (LlamaTokenizerFast, Trainer, TrainingArguments,
-                          default_data_collator, AutoTokenizer)
+
 from llmc.compression.quantization import *
 from llmc.compression.sparsification import *
 from llmc.compression.token_reduction import *
-from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
+from llmc.data import MixDataset, BaseTokenizer
 from llmc.eval.utils import eval_model, get_eval_list
-from llmc.eval import PerplexityEval
 from llmc.models import *
 from llmc.utils import (check_config, deploy_all_modality, get_modality,
                         mkdirs, print_important_package_version, seed_all,
@@ -88,81 +86,12 @@ def main(config):
             blockwise_opts.append(blockwise_opt)
             dist.barrier()
     if 'train' in config:
-        # backup model
-        ignored_modules = []
-        deploy_all_modality(blockwise_opts, 'train_rotate_quant')
-        dist.barrier()
-        def train(blockwise_opt):
-            llmc_model_to_train = copy.deepcopy(blockwise_opt.model)
-            ignored_modules.extend(blockwise_opt.get_ignored_modules(llmc_model_to_train))
-            llmc_model_to_train.model.config.use_cache = False
+        deploy_all_modality(
+            blockwise_opts,
+            config['train']["train_state"] if config['train'].get("train_state") else blockwise_opts[-1].avaliable_train_state[0]
+        )
 
-            dataset = MixDataset(tokenizer.get_tokenizer(), config.train.data, llmc_model_to_train.batch_process, llmc_model_to_train.processor)
-            model_max_length=config.train.data[0].seq_len if isinstance(config.train.data, list) else config.train.data.seq_len
-            train_tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path=config.model.path,
-                cache_dir=config.train.data[0].cache_dir if isinstance(config.train.data, list) else config.train.data.cache_dir,
-                model_max_length=model_max_length,
-                padding_side='right',
-                use_fast=True,
-                add_eos_token=False,
-                add_bos_token=False,
-            )
-
-
-            # if 'eval' in config and len(config.eval.eval_pos):
-            #     eval_list = []
-            #     name_list = (
-            #         config.eval.name
-            #         if not isinstance(config.eval.name, str)
-            #         else [config.eval.name]
-            #     )
-            #     for name in name_list:
-            #         eval_config = copy.deepcopy(config.eval)
-            #         eval_config.name = name
-            #         if len(name_list) != 1:  # eval multi datasets
-            #             eval_config.path = os.path.join(config.eval.path, name)
-            #         ppl_eval = PerplexityEval(blockwise_opt.model, eval_config)
-            #         eval_list.append(ppl_eval)
-
-            train_data = TrainJsonDataset(
-                dataset.get_raw_calib_dataset(),
-                train_tokenizer,
-                block_size=model_max_length,
-            )
-
-            train_args = TrainingArguments(**config.train.train_args)
-            trainable_parameters = blockwise_opt.get_trainable_params(llmc_model_to_train)
-            llmc_model_to_train.model.seqlen = model_max_length
-            optimizer = SGDG(trainable_parameters, lr=config.train.train_args.learning_rate, stiefel=True)
-            FSDPTrainer._optimizer = optimizer
-            trainer = FSDPTrainer(
-                model=llmc_model_to_train.model,
-                tokenizer=train_tokenizer,
-                args=train_args,
-                train_dataset=train_data,
-                eval_dataset=None,
-                data_collator=default_data_collator,
-                # optimizers=(optimizer, None),
-                optimizers=(None, None),
-                ignored_modules=ignored_modules,
-            )
-
-            trainer.train()
-            dist.barrier()
-
-            logger.info('End training')
-            
-
-            # blockwise_opt.model.model.to('cpu')
-            # blockwise_opt.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
-            state_dict = trainer.get_trained_params()
-            model_state = blockwise_opt.model.model.state_dict()
-            for name, param in model_state.items():
-                if name in state_dict:
-                    # 保持原 device，只拷贝数据
-                    param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
-        train(blockwise_opts[-1])
+        blockwise_opts[-1].train(tokenizer=tokenizer)
         gc.collect()
         torch.cuda.empty_cache()
         dist.barrier()

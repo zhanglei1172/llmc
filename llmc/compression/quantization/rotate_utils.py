@@ -3,6 +3,8 @@ import math
 import torch
 import torch.nn as nn
 from loguru import logger
+import geoopt
+from geoopt.manifolds import EuclideanStiefel,Stiefel
 
 from .hadamard_utils import HadamardTransform, matmul_hadU_cuda
 from .constant import *
@@ -10,13 +12,25 @@ from .constant import *
 class RotateModule(nn.Module):
     def __init__(self, Q_init):
         super(RotateModule, self).__init__()
-        self.weight = nn.Parameter(Q_init.to(torch.float32).to(torch.device('cuda')), requires_grad=True)
+        # self.weight = nn.Parameter(Q_init.to(torch.float32).to(torch.device('cuda')), requires_grad=True)
+        self.weight = geoopt.ManifoldParameter(Q_init.to(dtype=torch.float32,device="cuda"),manifold=Stiefel())
 
     def forward(self, x, transpose=False):
         if transpose:
             return x @ self.weight
         else:
             return self.weight @ x
+
+class SmoothModule(nn.Module):
+    def __init__(self, S_init):
+        super(SmoothModule, self).__init__()
+        self.weight = nn.Parameter(S_init.to(torch.float32).to(torch.device("cuda")))
+
+    def forward(self, x, inverse=False):
+        if inverse:
+            return x / self.weight
+        else:
+            return  x * self.weight   
 
 
 class WeightRotater:

@@ -1,3 +1,4 @@
+import copy
 import gc
 import os
 from functools import partial
@@ -6,9 +7,14 @@ import json
 import torch
 import torch.nn as nn
 from loguru import logger
+from transformers import (default_data_collator, AutoTokenizer)
 
 from llmc.utils.registry_factory import ALGO_REGISTRY
+from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
+from llmc.utils.registry_factory import MODEL_REGISTRY
 
+from .train_utils.fsdp_trainer import MyTrainer
+from .train_utils.train_utils import LLMCTrainingArguments
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import *
@@ -34,6 +40,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             self.preprocess()
         else:
             raise ValueError(f'Unsupported modality {self.modality}')
+
+        self.avaliable_train_state = ["train_rotate_quant"]
 
     def vision_preprocess(self):
         for m in self.model.modality_model.parameters():
@@ -451,3 +459,87 @@ class SpinQuant(BaseBlockwiseQuantization):
             config['tie_word_embeddings'] = False
         with open(path, 'w') as f:
             json.dump(config, f, indent=4)
+
+    def train(self, tokenizer=None):
+        # ignored_modules = []
+        llmc_model_to_train = copy.deepcopy(self.model)
+        # ignored_modules.extend(self.get_ignored_modules(llmc_model_to_train))
+        llmc_model_to_train.model.config.use_cache = False
+
+        dataset = MixDataset(tokenizer.get_tokenizer(), self.config.train.data, llmc_model_to_train.batch_process, llmc_model_to_train.processor)
+        model_max_length=self.config.train.data[0].seq_len if isinstance(self.config.train.data, list) else self.config.train.data.seq_len
+        train_tokenizer = AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path=self.config.model.path,
+            cache_dir=self.config.train.data[0].cache_dir if isinstance(self.config.train.data, list) else self.config.train.data.cache_dir,
+            model_max_length=model_max_length,
+            padding_side='right',
+            use_fast=True,
+            add_eos_token=False,
+            add_bos_token=False,
+        )
+
+
+        # if 'eval' in config and len(config.eval.eval_pos):
+        #     eval_list = []
+        #     name_list = (
+        #         config.eval.name
+        #         if not isinstance(config.eval.name, str)
+        #         else [config.eval.name]
+        #     )
+        #     for name in name_list:
+        #         eval_config = copy.deepcopy(config.eval)
+        #         eval_config.name = name
+        #         if len(name_list) != 1:  # eval multi datasets
+        #             eval_config.path = os.path.join(config.eval.path, name)
+        #         ppl_eval = PerplexityEval(self.model, eval_config)
+        #         eval_list.append(ppl_eval)
+
+        train_data = TrainJsonDataset(
+            dataset.get_raw_calib_dataset(),
+            train_tokenizer,
+            block_size=model_max_length,
+        )
+
+        train_args = LLMCTrainingArguments(**self.config.train.train_args)
+        # trainable_parameters = self.get_trainable_params(llmc_model_to_train)
+        llmc_model_to_train.model.seqlen = model_max_length
+        # optimizer = SGDG(trainable_parameters, lr=self.config.train.train_args.learning_rate, stiefel=True)
+        # FSDPTrainer._optimizer = optimizer
+        need_teacher = train_args.special.get("loss_type", 'origin') not in  ("origin", "DFT")
+        if need_teacher:
+            teacher_model = MODEL_REGISTRY[self.config.model.type](self.config).model
+            teacher_model.eval()
+            for param in teacher_model.parameters():
+                param.requires_grad = False
+            teacher_model.config.use_cache = False
+            llmc_model_to_train.model.teacher = TeacherModel(teacher_model)
+        trainer = MyTrainer(
+            model=llmc_model_to_train.model,
+            tokenizer=train_tokenizer,
+            args=train_args,
+            train_dataset=train_data,
+            eval_dataset=None,
+            data_collator=default_data_collator,
+            # optimizers=(optimizer, None),
+            # optimizers=(None, None),
+            # ignored_modules=ignored_modules,
+        )
+        
+        torch.distributed.barrier()
+
+        trainer.train()
+        torch.distributed.barrier()
+
+        logger.info('End training')
+        if need_teacher:
+            del llmc_model_to_train.model.teacher, teacher_model
+        
+
+        # self.model.model.to('cpu')
+        # self.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
+        state_dict = trainer.get_trained_params()
+        model_state = self.model.model.state_dict()
+        for name, param in model_state.items():
+            if name in state_dict:
+                # 保持原 device，只拷贝数据
+                param.copy_(state_dict[name].to(param.device, dtype=param.dtype))

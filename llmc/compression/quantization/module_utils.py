@@ -56,6 +56,14 @@ def get_module_name(model, module):
             return name
     return None
 
+class TeacherModel(nn.Module):
+    def __init__(self, ori_moule):
+        super().__init__()
+        self.ori_moule = ori_moule
+
+    def forward(self, *args, **kwargs):
+        return self.ori_moule(*args, **kwargs)
+    
 class OriginEmbedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, padding_idx,
                  max_norm, norm_type, scale_grad_by_freq,
