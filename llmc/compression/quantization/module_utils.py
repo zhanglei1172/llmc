@@ -467,6 +467,72 @@ class LlmcRMSNorm(nn.Module):
     def __repr__(self):
         return 'LlmcRMSNorm()'
 
+class LlmcScaleRMSNorm(LlmcRMSNorm):
+    def __init__(self, weight, w_rot, eps=1e-6):
+        self.bias = None
+        super().__init__(weight, eps)
+        self.w_rot = w_rot
+        self.register_buffer("buf_w_rotate", torch.tensor(w_rot is not None))
+
+    def forward(self, hidden_states):
+        if self.buf_w_rotate:
+            weight, _ = self._rotate_weight()
+        else:
+            weight = self.weight
+        input_dtype = hidden_states.dtype
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        # return F.rms_norm(hidden_states, self.weight.shape, self.weight, self.variance_epsilon).to(input_dtype)
+        return weight * hidden_states.to(input_dtype)
+
+    def _rotate_weight(self):
+        tmp_weight, bias = self.w_rot(self)
+        return tmp_weight, bias
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_rot, a_rot=None):
+        assert a_rot is None, "a_rot is not supported in LlmcScaleRMSNorm"
+        if hasattr(module, 'eps'):
+            eps = module.eps
+        else:
+            eps = module.variance_epsilon
+        weight = module.weight
+        new_module = cls(weight, w_rot, eps)
+        return new_module
+
+    def __repr__(self):
+        return ('LlmcScaleRMSNorm(), '
+            f"w_rotate={self.buf_w_rotate}) "
+        )
+
+class OriginLlmcRMSNorm(nn.Module):
+    def __init__(self, weight, eps=1e-6):
+        super().__init__()
+        self.variance_epsilon = eps
+        self.weight = nn.Parameter(weight, requires_grad=False)
+
+
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        # return F.rms_norm(hidden_states, self.weight.shape, self.weight, self.variance_epsilon).to(input_dtype)
+        return self.weight * hidden_states.to(input_dtype)
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module):
+        if hasattr(module, 'eps'):
+            eps = module.eps
+        else:
+            eps = module.variance_epsilon
+        weight = module.weight
+        new_module = cls(weight, eps)
+        return new_module
+
+    def __repr__(self):
+        return 'OriginLlmcRMSNorm()'
 
 class LlmcQwen2RMSNorm(LlmcLlamaRMSNorm):
     def __init__(self, weight, eps=1e-6):
@@ -1788,6 +1854,8 @@ _LLMC_LN_TYPES_ = [
     LlmcInternLM2RMSNorm,
     LlmcGemma2RMSNorm,
     LlmcMiniCPMRMSNorm,
+    LlmcScaleRMSNorm,
+    OriginLlmcRMSNorm,
 ]
 
 

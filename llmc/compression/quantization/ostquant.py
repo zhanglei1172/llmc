@@ -20,7 +20,7 @@ from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import *
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
                            EffcientFakeQuantLinear, FakeQuantLinear, RotateFakeQuantLinear,
-                           LlmcRMSNorm, OriginEmbedding, OriginFloatLinear,
+                           LlmcScaleRMSNorm, OriginEmbedding, OriginFloatLinear,
                            OriginFloatConv3d,
                            RotateEmbedding, RotateLinear2, _ROTATE_LINEAR_MAP_,
                            _REALQUANT_LINEAR_MAP_, get_module_name)
@@ -51,9 +51,33 @@ class OSTQuant(SpinQuant):
         # self.o_proj_group_quant = self.quant_config['special']['o_proj_group_quant']
 
 
-    def w_rot(self, module, w_rotater, args):
-        return w_rotater.rotate(module.weight, module.bias, args['Q1'], args['Q2'], args['transpose'], args.get('Sin'), args.get('Sout'), args.get('inverse_out'), self.had_dim)
+    def register_lmhead_spin_parameters(self):
+        pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
+        pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
+        S_head = SmoothModule(torch.ones(pre_head_ln.weight.shape[0],dtype=torch.float32,device=self.dev))
+        self.model.modality_model.S_head = S_head
+        args = {'Sout': S_head}
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        self.model.replace_module_subset(
+            LlmcScaleRMSNorm,
+            self.model.model,
+            {'layers': {pre_head_ln_name: pre_head_ln}},
+            None,
+            params_dict,
+        )
+        args = {'Sin': S_head, 'Q1': self.model.modality_model.Q1}
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        head_layers = {get_module_name(self.model.model, h): h for h in self.model.get_head_layers()}
+        self.model.replace_module_subset(
+            RotateLinear2,
+            self.model.model,
+            {'layers': head_layers},
+            None,
+            params_dict,
+        )
 
+    def w_rot(self, module, w_rotater, args):
+        return w_rotater.rotate(module.weight, module.bias, args.get('Q1'), args.get('Q2'), args.get('transpose'), args.get('Sin'), args.get('Sout'), args.get('inverse_out'), self.had_dim)
 
     def block_transform(self, block):
         logger.info(f'Start transform the {self.block_idx+1}-th block')
@@ -62,7 +86,7 @@ class OSTQuant(SpinQuant):
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
 
-        self.model.replace_module_block(LlmcRMSNorm, block, self.block_idx, {})
+        # self.model.replace_module_block(LlmcRMSNorm, block, self.block_idx, {})
 
         logger.info(f'block:{block}')
         logger.info(f'End transform the {self.block_idx+1}-th block')
@@ -83,10 +107,10 @@ class OSTQuant(SpinQuant):
             if 'is_mlp' not in subset or not subset['is_mlp']:
                 Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
                 subset['inspect'].Q2 = RotateModule(Q2)
-                # S_norm_qkv = SmoothModule(torch.ones(prev_op[0].weight.shape[-1],dtype=torch.float32,device=self.dev)).weight
+                S_norm_qkv = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
                 S_qk = SmoothModule(torch.ones(layers_dict['self_attn.k_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
                 S_ov = SmoothModule(torch.ones(layers_dict['self_attn.v_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
-                block.S_norm_qkv = None # S_norm_qkv
+                block.S_norm_qkv = S_norm_qkv
                 block.S_qk = S_qk
                 block.S_ov = S_ov
                 # for n in layers_dict.keys():
@@ -99,10 +123,21 @@ class OSTQuant(SpinQuant):
                 n = 'self_attn.v_proj'
                 m = layers_dict[n]
                 self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=subset['inspect'].Q2, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_ov, inverse_out=False)
+
+                args = {'Sout': S_norm_qkv}
+                params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+                norm_name = get_module_name(block, prev_op[0])
+                self.model.replace_module_subset(
+                    LlmcScaleRMSNorm,
+                    block,
+                    {'layers': {norm_name: prev_op[0]}},
+                    self.block_idx,
+                    params_dict,
+                )
             else:
-                # S_norm_upgate = SmoothModule(torch.ones(prev_op[0].weight.shape[-1],dtype=torch.float32,device=self.dev)).weight
+                S_norm_upgate = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
                 S_up_down = SmoothModule(torch.ones(layers_dict['mlp.up_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
-                block.S_norm_upgate = None # S_norm_upgate
+                block.S_norm_upgate = S_norm_upgate
                 block.S_up_down = S_up_down
                 # for n in layers_dict.keys():
                 n = 'mlp.up_proj'
@@ -111,6 +146,17 @@ class OSTQuant(SpinQuant):
                 n = 'mlp.gate_proj'
                 m = layers_dict[n]
                 self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_upgate, inverse_out=False)
+
+                args = {'Sout': S_norm_upgate}
+                params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+                norm_name = get_module_name(block, prev_op[0])
+                self.model.replace_module_subset(
+                    LlmcScaleRMSNorm,
+                    block,
+                    {'layers': {norm_name: prev_op[0]}},
+                    self.block_idx,
+                    params_dict,
+                )
 
         else:
             if self.config['model']['type'] in ['Opt']:
@@ -149,3 +195,48 @@ class OSTQuant(SpinQuant):
             self.block_idx,
             params_dict
         )
+
+    def apply_lmhead_rotate_weight(self):
+        pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
+        if isinstance(pre_head_ln, LlmcScaleRMSNorm):
+            pre_head_ln.cuda()
+            weight, bias = pre_head_ln._rotate_weight()
+            pre_head_ln.weight.data = weight.data
+            if bias is not None:
+                pre_head_ln.bias.data = bias.data
+            pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
+            pre_head_ln.cpu()
+        lm_head_layer = self.model.get_head_layers()[0]
+        if isinstance(lm_head_layer, RotateLinear2):
+            lm_head_layer.cuda()
+            weight, bias = lm_head_layer._rotate_weight()
+            lm_head_layer.weight.data = weight.data
+            if bias is not None:
+                lm_head_layer.bias.data = bias.data
+            # lm_head_layer.weight, lm_head_layer.bias = weight, bias
+            lm_head_layer_name = get_module_name(self.model.model, lm_head_layer)
+            self.model.replace_module_subset(
+                OriginFloatLinear,
+                self.model.model,
+                {'layers': {lm_head_layer_name: lm_head_layer}},
+                None,
+                {}
+            )
+            lm_head_layer.cpu()
+
+            
+    def deploy(self, quant_format, keep_device=False):
+        super().deploy(quant_format, keep_device=keep_device)
+        if quant_format == 'origin_float':
+            self.model.replace_module_all(OriginLlmcRMSNorm, {})
+            
+            pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
+            pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
+
+            self.model.replace_module_subset(
+                OriginLlmcRMSNorm,
+                self.model.model,
+                {'layers': {pre_head_ln_name: pre_head_ln}},
+                None,
+                {},
+            )

@@ -59,7 +59,7 @@ class WeightRotater:
                     tmp_weight = tmp_weight.reshape(transposed_shape).t()
                 if bias is not None and not transpose:
                     dtype = bias.dtype
-                    dev = bias.data.device
+                    dev = bias.device
                     bias_shape = bias.shape
                     tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
 
@@ -98,7 +98,7 @@ class WeightRotaterSmooth:
                     tmp_weight = tmp_weight.reshape(transposed_shape).t()
                 if bias is not None and not transpose:
                     dtype = bias.dtype
-                    dev = bias.data.device
+                    dev = bias.device
                     bias_shape = bias.shape
                     tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
 
@@ -108,28 +108,34 @@ class WeightRotaterSmooth:
 
         if Sin is not None:
             dtype = tmp_weight.dtype
-            dev = tmp_weight.data.device
+            dev = tmp_weight.device
             S = Sin.weight
+            S = S.to(device=dev, dtype=torch.float64)
             if tmp_weight.shape[1] != S.numel():
                 S = S.view(1, -1, head_dim)
                 S = torch.repeat_interleave(S, dim=1, repeats=tmp_weight.shape[1]//S.numel())
-            tmp_weight = (tmp_weight.to(S.dtype) / S.view(1, -1)).to(device=ROTATE_DEV, dtype=dtype)
+            tmp_weight = (tmp_weight.to(device=dev, dtype=torch.float64) / S.view(1, -1)).to(device=ROTATE_DEV, dtype=dtype)
         if Sout is not None:
             dtype = tmp_weight.dtype
-            dev = tmp_weight.data.device
+            dev = tmp_weight.device
             S = Sout.weight
+            S = S.to(device=dev, dtype=torch.float64)
             if tmp_weight.shape[0] != S.numel():
                 S = S.view(1, -1, head_dim)
                 S = torch.repeat_interleave(S, dim=1, repeats=tmp_weight.shape[1]//S.numel()).flatten()
             if inverse_out:
-                tmp_weight = (tmp_weight.to(S.dtype) / S.view(-1, 1)).to(device=ROTATE_DEV, dtype=dtype)
+                tmp_weight = (tmp_weight.to(device=dev, dtype=torch.float64) / S.view(-1, 1)).to(device=ROTATE_DEV, dtype=dtype)
             else:
-                tmp_weight = (tmp_weight.to(S.dtype) * S.view(-1, 1)).to(device=ROTATE_DEV, dtype=dtype)
+                if tmp_weight.dim() == 1:
+                    # tmp_weight = (tmp_weight.to(S.dtype) * S).to(device=ROTATE_DEV, dtype=dtype)
+                    tmp_weight = (tmp_weight.to(device=dev, dtype=torch.float64) * S).to(device=ROTATE_DEV, dtype=dtype)
+                else:
+                    tmp_weight = (tmp_weight.to(device=dev, dtype=torch.float64) * S.view(-1, 1)).to(device=ROTATE_DEV, dtype=dtype)
             if tmp_bias is not None:
                 if inverse_out:
-                    tmp_bias = (tmp_bias.to(S.dtype) / S).to(device=ROTATE_DEV, dtype=dtype)
+                    tmp_bias = (tmp_bias.to(device=dev, dtype=torch.float64) / S).to(device=ROTATE_DEV, dtype=dtype)
                 else:
-                    tmp_bias = (tmp_bias.to(S.dtype) * S).to(device=ROTATE_DEV, dtype=dtype)
+                    tmp_bias = (tmp_bias.to(device=dev, dtype=torch.float64) * S).to(device=ROTATE_DEV, dtype=dtype)
 
         tmp_weight = tmp_weight.to(self.dev)
         tmp_bias = tmp_bias.to(self.dev) if tmp_bias is not None else None

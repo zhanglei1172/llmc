@@ -236,7 +236,7 @@ class SpinQuant(BaseBlockwiseQuantization):
             block.cuda()
             logger.info(f'Start apply {idx}-th block rotate weights')
             for name, module in block.named_modules():
-                if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
+                if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear, LlmcScaleRMSNorm)):
                     weight, bias = module._rotate_weight()
                     module.weight.data = weight.data
                     if bias is not None:
