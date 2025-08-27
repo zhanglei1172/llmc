@@ -215,7 +215,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 ), 'Only support per_tensor static quant'
             self.quant_attn = self.quant_config['act'].get('quant_attn', False)
             if self.quant_attn:
-                assert self.config['model']['type'] in ['Vit', 'DeepseekV2']
+                assert self.config['model']['type'] in _LLMC_ATTN_MAP_.keys()
                 self.quant_softmax = self.quant_config['act'].get(
                     'quant_softmax', False
                 )

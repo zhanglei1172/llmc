@@ -85,6 +85,8 @@ class OSTQuant(SpinQuant):
         subsets = self.model.get_subsets_in_block(block)
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
+        
+        self.set_non_linear_mode('fake_quant', block, False)
 
         # self.model.replace_module_block(LlmcRMSNorm, block, self.block_idx, {})
 
@@ -228,6 +230,7 @@ class OSTQuant(SpinQuant):
     def deploy(self, quant_format, keep_device=False):
         super().deploy(quant_format, keep_device=keep_device)
         if quant_format == 'origin_float':
+            self.set_non_linear_mode('fake_quant', self.model.model, True)
             self.model.replace_module_all(OriginLlmcRMSNorm, {})
             
             pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]

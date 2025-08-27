@@ -1,5 +1,7 @@
 MEASUREMENT = "snr"
 ROTATE_DEV = None # None or 'cpu'
+QK_USE_FLOAT = True
+USE_COMPILE = True
 
 def set_rotate_device(device):
     global ROTATE_DEV

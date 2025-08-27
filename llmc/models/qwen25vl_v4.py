@@ -51,6 +51,7 @@ class Qwen25VL_V4(Qwen25VL):
             trust_remote_code=True,
             torch_dtype=self.torch_dtype,
             low_cpu_mem_usage=True,
+            attn_implementation="eager", # TODO for quant_attn
         )
 
         class ExpandVocabLinear(nn.Module):
