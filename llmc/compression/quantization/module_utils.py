@@ -34,6 +34,18 @@ except Exception:
         'If you need it, please install it firstly.'
     )
 
+class QKHadamardWrapper(nn.Module):
+    def __init__(self, func):
+        super().__init__()
+        self.func = func
+    
+    def forward(self, *args, **kwargs):
+        q, k = self.func(*args, **kwargs)
+        dtype = q.dtype
+        q = fast_hadamard_transform.hadamard_transform(q.float(), scale=1/torch.sqrt(torch.tensor(q.shape[-1], dtype=torch.float32))).to(dtype)
+        k = fast_hadamard_transform.hadamard_transform(k.float(), scale=1/torch.sqrt(torch.tensor(k.shape[-1], dtype=torch.float32))).to(dtype)
+        return q, k
+
 from .utils import calculate_zeros_width
 
 

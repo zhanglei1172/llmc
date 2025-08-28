@@ -11,7 +11,7 @@ from llmc.utils.registry_factory import ALGO_REGISTRY
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
-                           LlmcRMSNorm, RotateLinear, get_module_name)
+                           LlmcRMSNorm, RotateLinear, QKHadamardWrapper, get_module_name,)
 from .constant import *
 
 
@@ -153,6 +153,8 @@ class Quarot(BaseBlockwiseQuantization):
 
         if self.online_rotate:
             self.replace_rotate_linears(block)
+            self._add_qk_rotation_to_attention(block)
+
         subsets = self.model.get_subsets_in_block(block)
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
@@ -162,6 +164,42 @@ class Quarot(BaseBlockwiseQuantization):
 
         logger.info(f'block:{block}')
         logger.info(f'End transform the {self.block_idx+1}-th block')
+
+    def _add_qk_rotation_to_attention(self, block):
+        """Add QK Hadamard rotation to attention modules."""
+        logger.info('Adding QK Hadamard rotation to attention modules')
+        
+        # Find the attention module in the block
+        attention_module = None
+        for name, module in block.named_modules():
+            if 'self_attn' in name and hasattr(module, 'rotary_emb'):
+                attention_module = module
+                break
+        
+        if attention_module is None:
+            logger.warning('No attention module found in this block.')
+            return
+        
+        # Store original forward method
+        original_forward = attention_module.forward
+        
+        def wrapped_forward(self, *args, **kwargs):
+            # Temporarily replace apply_multimodal_rotary_pos_emb with wrapped version
+            import transformers.models.qwen2_5_vl.modeling_qwen2_5_vl as qwen_module
+            original_func = qwen_module.apply_multimodal_rotary_pos_emb
+            qwen_module.apply_multimodal_rotary_pos_emb = QKHadamardWrapper(original_func).forward
+            
+            try:
+                result = original_forward(*args, **kwargs)
+            finally:
+                # Restore original function
+                qwen_module.apply_multimodal_rotary_pos_emb = original_func
+            
+            return result
+        
+        # Replace the forward method
+        attention_module.forward = wrapped_forward.__get__(attention_module, type(attention_module))
+        logger.info('Successfully wrapped apply_multimodal_rotary_pos_emb function')
 
     @torch.no_grad()
     def subset_transform(self, block, subset):
