@@ -79,7 +79,7 @@ class OSTQuant(SpinQuant):
     #     )
 
     def w_rot(self, module, w_rotater, args):
-        return w_rotater.rotate(module.weight, module.bias, args.get('Q1'), args.get('Q2'), args.get('transpose'), args.get('Sin'), args.get('Sout'), args.get('inverse_out'), self.had_dim)
+        return w_rotater.rotate(module.weight, module.bias, args.get('Q1'), args.get('Q2'), args.get('transpose'), args.get('Sin'), args.get('Sout'), args.get('inverse_out'), self.had_dim, args.get('is_qk',False))
 
     def block_transform(self, block):
         logger.info(f'Start transform the {self.block_idx+1}-th block')
@@ -112,7 +112,7 @@ class OSTQuant(SpinQuant):
                 Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
                 subset['inspect'].Q2 = RotateModule(Q2)
                 S_norm_qkv = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
-                S_qk = SmoothModule(torch.ones(layers_dict['self_attn.k_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
+                S_qk = SmoothModule(torch.ones(layers_dict['self_attn.k_proj'].weight.shape[0]//2,dtype=torch.float32,device=self.dev)) # TODO //2 for 等价
                 S_ov = SmoothModule(torch.ones(layers_dict['self_attn.v_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
                 block.S_norm_qkv = S_norm_qkv
                 block.S_qk = S_qk
@@ -120,10 +120,10 @@ class OSTQuant(SpinQuant):
                 # for n in layers_dict.keys():
                 n = 'self_attn.q_proj'
                 m = layers_dict[n]
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_qk, inverse_out=False)
+                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_qk, inverse_out=False, is_qk=True)
                 n = 'self_attn.k_proj'
                 m = layers_dict[n]
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_qk, inverse_out=True)
+                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_qk, inverse_out=True, is_qk=True)
                 n = 'self_attn.v_proj'
                 m = layers_dict[n]
                 self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=subset['inspect'].Q2, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_ov, inverse_out=False)
@@ -190,7 +190,7 @@ class OSTQuant(SpinQuant):
                 self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=True,Sin=block.S_ov)
                 # self.replace_rotate_sm_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
     
-    def replace_rotate_sm_fc(self, block, n, m, Q1=None, Q2=None, transpose=False, Sin=None, Sout=None, inverse_out=False):
+    def replace_rotate_sm_fc(self, block, n, m, Q1=None, Q2=None, transpose=False, Sin=None, Sout=None, inverse_out=False, is_qk=False):
         args = {}
         if hasattr(self, 'weight_rotate') and self.weight_rotate:
             args['Q1'] = Q1
@@ -199,6 +199,7 @@ class OSTQuant(SpinQuant):
             args['Sin'] = Sin
             args['Sout'] = Sout
             args['inverse_out'] = inverse_out
+            args['is_qk'] = is_qk
 
         params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=n, args=args)
         if params_dict == {}:

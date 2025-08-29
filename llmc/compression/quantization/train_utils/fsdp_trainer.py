@@ -156,7 +156,7 @@ class MyTrainer(Trainer):
         
         loss = super().training_step(model, inputs, num_items_in_batch)
         if int(os.environ['RANK']) == 0:
-            nni.report_intermediate_result({"default": 1000.0, "loss": loss.item()})
+            nni.report_intermediate_result({"default": 10.0, "loss": loss.item()})
         return loss
 
     @torch.compile(fullgraph=False)

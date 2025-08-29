@@ -77,7 +77,7 @@ class WeightRotaterSmooth:
         self.rotate_func = weight_rotate_func
         self.dev = dev
 
-    def rotate(self, weight, bias, Q1, Q2, transpose, Sin, Sout, inverse_out=False, head_dim=None):
+    def rotate(self, weight, bias, Q1, Q2, transpose, Sin, Sout, inverse_out=False, head_dim=None, is_qk=False):
 
         if Q1 is not None:
             tmp_weight, tmp_bias = self.rotate_func(weight, bias, Q1.weight, transpose)
@@ -120,9 +120,11 @@ class WeightRotaterSmooth:
             dev = tmp_weight.device
             S = Sout.weight
             S = S.to(device=dev, dtype=torch.float64)
+            if is_qk:
+                S = S.reshape(-1, head_dim//2).repeat([1, 2]).reshape(-1)
             if tmp_weight.shape[0] != S.numel():
                 S = S.view(1, -1, head_dim)
-                S = torch.repeat_interleave(S, dim=1, repeats=tmp_weight.shape[1]//S.numel()).flatten()
+                S = torch.repeat_interleave(S, dim=1, repeats=tmp_weight.shape[0]//S.numel()).flatten()                    
             if inverse_out:
                 tmp_weight = (tmp_weight.to(device=dev, dtype=torch.float64) / S.view(-1, 1)).to(device=ROTATE_DEV, dtype=dtype)
             else:
