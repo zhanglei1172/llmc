@@ -24,6 +24,7 @@ from llmc.utils import (check_config, deploy_all_modality, get_modality,
                         update_autoawq_quant_config, update_vllm_quant_config)
 from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
 
+import nni
 
 def main(config):
     eval_ress = {}
@@ -86,6 +87,16 @@ def main(config):
             blockwise_opts.append(blockwise_opt)
             dist.barrier()
     if 'train' in config:
+        if int(os.environ['RANK']) == 0:
+            # 假设这个字典是在 rank 0 上动态创建的
+            object_list = [nni.get_next_parameter()]
+        else:
+            object_list = [None]
+
+        dist.broadcast_object_list(object_list, src=0)
+
+        RCV_PARAMS = object_list[0]
+        config.train.train_args.special.update(RCV_PARAMS)
         deploy_all_modality(
             blockwise_opts,
             config['train']["train_state"] if config['train'].get("train_state") else blockwise_opts[-1].avaliable_train_state[0]
@@ -117,6 +128,9 @@ def main(config):
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant')
         if eval_res is not None:
             eval_ress.update(eval_res)
+        if int(os.environ['RANK']) == 0:
+            # import nni
+            nni.report_final_result({"default":eval_ress['fake_quant']['wikitext2'], "loss": 0.0})
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant_wo_kv')
         if eval_res is not None:
             eval_ress.update(eval_res)

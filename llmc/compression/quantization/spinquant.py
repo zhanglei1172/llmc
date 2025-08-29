@@ -329,6 +329,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
 
+        self.set_non_linear_mode('fake_quant', block, False)
         self.model.replace_module_block(LlmcRMSNorm, block, self.block_idx, {})
 
         logger.info(f'block:{block}')
@@ -448,6 +449,8 @@ class SpinQuant(BaseBlockwiseQuantization):
                     torch.save(state_dict, os.path.join(self.config.save.save_path,'rotate_weight.pth'))
                 self.apply_rotate_weight()
                 super().deploy(quant_format)
+        if quant_format == 'origin_float':
+            self.set_non_linear_mode('fake_quant', self.model.model, True)
 
     @torch.no_grad()
     def save_model(self, path):
@@ -463,6 +466,7 @@ class SpinQuant(BaseBlockwiseQuantization):
     def train(self, tokenizer=None):
         # ignored_modules = []
         llmc_model_to_train = copy.deepcopy(self.model)
+        llmc_model_to_train.config.calib = self.config.train.data
         # ignored_modules.extend(self.get_ignored_modules(llmc_model_to_train))
         llmc_model_to_train.model.config.use_cache = False
 
@@ -470,13 +474,14 @@ class SpinQuant(BaseBlockwiseQuantization):
         model_max_length=self.config.train.data[0].seq_len if isinstance(self.config.train.data, list) else self.config.train.data.seq_len
         train_tokenizer = AutoTokenizer.from_pretrained(
             pretrained_model_name_or_path=self.config.model.path,
-            cache_dir=self.config.train.data[0].cache_dir if isinstance(self.config.train.data, list) else self.config.train.data.cache_dir,
+            cache_dir=getattr(self.config.train.data, "cache_dir", None),
             model_max_length=model_max_length,
             padding_side='right',
             use_fast=True,
             add_eos_token=False,
             add_bos_token=False,
         )
+        llmc_model_to_train.processor.tokenizer = train_tokenizer
 
 
         # if 'eval' in config and len(config.eval.eval_pos):
@@ -493,7 +498,6 @@ class SpinQuant(BaseBlockwiseQuantization):
         #             eval_config.path = os.path.join(config.eval.path, name)
         #         ppl_eval = PerplexityEval(self.model, eval_config)
         #         eval_list.append(ppl_eval)
-
         train_data = TrainJsonDataset(
             dataset.get_raw_calib_dataset(),
             train_tokenizer,
@@ -517,13 +521,21 @@ class SpinQuant(BaseBlockwiseQuantization):
                 param.requires_grad = False
             teacher_model.config.use_cache = False
             llmc_model_to_train.model.teacher = TeacherModel(teacher_model)
+        # from trl.trainer.utils import DataCollatorForCompletionOnlyLM
+        # from accelerate.utils import operations
+        from llmc.utils import patch
+        from types import MethodType
+        # _concatenate = operations.concatenate
+        # operations.concatenate = patch.concatenate
+        train_tokenizer.pad = MethodType(patch.pad, train_tokenizer)
         trainer = MyTrainer(
             model=llmc_model_to_train.model,
             tokenizer=train_tokenizer,
             args=train_args,
             train_dataset=train_data,
             eval_dataset=None,
-            data_collator=default_data_collator,
+            # data_collator=default_data_collator,
+            data_collator=patch.CustomDataCollatorForCompletionOnlyLM("<|im_start|>assistant\n", tokenizer=train_tokenizer, pad_to_multiple_of=8),
             # optimizers=(optimizer, None),
             # optimizers=(None, None),
             # ignored_modules=ignored_modules,
@@ -531,7 +543,12 @@ class SpinQuant(BaseBlockwiseQuantization):
         
         torch.distributed.barrier()
 
-        trainer.train()
+        res = trainer.train()
+        # operations.concatenate = _concatenate
+        # if int(os.environ['RANK']) == 0:
+        #     import nni
+        #     nni.report_final_result(res.training_loss)
+        
         torch.distributed.barrier()
 
         logger.info('End training')

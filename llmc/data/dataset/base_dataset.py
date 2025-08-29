@@ -17,6 +17,7 @@ class BaseDataset(metaclass=ABCMeta):
     def __init__(self, tokenizer, calib_cfg, batch_process=None, processor=None):
         # calib_cfg
         logger.info(f'calib_cfg : {calib_cfg}')
+        self.calib_cfg = calib_cfg
         self.tokenizer = tokenizer
         self.batch_process = batch_process
         self.processor = processor
@@ -86,6 +87,7 @@ class BaseDataset(metaclass=ABCMeta):
                 self.task_clss = TASK2EVAL[self.calib_dataset_name.strip('V4_')]
                 self.calib_dataset = None
             elif self.calib_dataset_name in [
+                'custom_msg',
                 'custom_txt',
                 'custom_mm',
                 'images',
@@ -100,7 +102,7 @@ class BaseDataset(metaclass=ABCMeta):
         if not self.padding:
             if self.calib_dataset_name in ['t2v', 'i2v']:
                 calib_model_inputs = samples
-            elif self.calib_dataset_name == 'images':
+            elif self.calib_dataset_name in ['images', 'custom_msg']:
                 calib_model_inputs = self.get_batch_process(samples)
             else:
                 assert not self.calib_dataset_name == 'custom_mm'
@@ -110,6 +112,7 @@ class BaseDataset(metaclass=ABCMeta):
                         calib_or_eval='calib',
                         apply_chat_template=self.apply_chat_template,
                         return_inputs=False,
+                        calib_cfg=self.calib_cfg,
                     )
                 else:
                     txts = self.calib_dataset
@@ -161,8 +164,7 @@ class BaseDataset(metaclass=ABCMeta):
                         calib_model_inputs.append({'input_ids': batch})
         else:
             assert (
-                self.calib_dataset_name == 'custom_txt'
-                or self.calib_dataset_name == 'custom_mm'
+                self.calib_dataset_name in ['custom_txt', 'custom_mm', 'custom_msg']
             )
             calib_model_inputs = self.get_batch_process(
                 samples if self.n_samples == -1 else random.choices(samples, k=self.n_samples)
@@ -177,6 +179,7 @@ class BaseDataset(metaclass=ABCMeta):
                     samples,
                     calib_or_eval='calib',
                     apply_chat_template=self.apply_chat_template,
+                    calib_cfg=self.calib_cfg,
                 )
             )
         elif self.calib_bs == 1:
@@ -185,6 +188,7 @@ class BaseDataset(metaclass=ABCMeta):
                     [sample],
                     calib_or_eval='calib',
                     apply_chat_template=self.apply_chat_template,
+                    calib_cfg=self.calib_cfg,
                 )
                 for sample in samples
             ]
@@ -198,6 +202,7 @@ class BaseDataset(metaclass=ABCMeta):
                         batch,
                         calib_or_eval='calib',
                         apply_chat_template=self.apply_chat_template,
+                        calib_cfg=self.calib_cfg,
                     )
                 )
         return calib_model_inputs
@@ -233,6 +238,8 @@ class BaseDataset(metaclass=ABCMeta):
                 with open(audio_img_qa_json) as fp:
                     custom_data_samples.extend(json.load(fp))
         for idx in range(len(custom_data_samples)):
+            if isinstance(custom_data_samples[idx], list):
+                continue
             if 'audio' in custom_data_samples[idx]:
                 if isinstance(custom_data_samples[idx]['audio'], list):
                     for audio_idx in range(len(custom_data_samples[idx]['audio'])):
@@ -307,11 +314,11 @@ class MixDataset(BaseDataset):
         raw_calib_model_inputs = []
         for dataset in self.datasets:
             raw_inputs = dataset.calib_dataset
-            if raw_inputs is not None:
+            if not isinstance(raw_inputs, list):
                 raw_calib_model_inputs.extend(raw_inputs)
             else:
-                calib_model_inputs = dataset.get_calib_model_inputs(None)
-                # calib_model_inputs, masks = dataset.get_calib_dataset()
+                calib_model_inputs = dataset.get_calib_model_inputs(raw_inputs)
+            # calib_model_inputs, masks = dataset.get_calib_dataset()
                 raw_calib_model_inputs.extend(calib_model_inputs)
         if len(raw_calib_model_inputs) == 0:
             raise ValueError("No samples found in the mixed datasets.")

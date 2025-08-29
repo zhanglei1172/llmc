@@ -30,6 +30,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from accelerate.utils import DistributedDataParallelKwargs
 from accelerate import Accelerator
 
+import os
+import nni
+
+
 def pt_fsdp_state_dict(model: torch.nn.Module):
     save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
     with PT_FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
@@ -146,6 +150,16 @@ class MyTrainer(Trainer):
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             self.accelerator.state.fsdp_plugin.use_orig_params = True
 
+    def training_step(
+        self, model: nn.Module, inputs, num_items_in_batch=None
+    ):
+        
+        loss = super().training_step(model, inputs, num_items_in_batch)
+        if int(os.environ['RANK']) == 0:
+            nni.report_intermediate_result({"default": 1000.0, "loss": loss.item()})
+        return loss
+
+    @torch.compile(fullgraph=False)
     def compute_loss(self, model, inputs, **kwargs):
         args = self.args
         loss_type = args.special.get("loss_type", "origin")

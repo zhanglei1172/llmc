@@ -559,5 +559,6 @@ class LlmcQwen2_5_VLAttention(nn.Module):
 _LLMC_ATTN_MAP_ = {
     'Vit': LlmcViTSelfAttention,
     'DeepseekV2': LlmcDeepseekAttention,
-    'Qwen25VL_V4': LlmcQwen2_5_VLAttention
+    'Qwen25VL_V4': LlmcQwen2_5_VLAttention,
+    'Qwen25VL': LlmcQwen2_5_VLAttention,
     }
