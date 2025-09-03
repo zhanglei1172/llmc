@@ -148,7 +148,7 @@ class AutoClipper:
                     if i in org_out_dict:
                         org_out = org_out_dict[i]
                     else:
-                        org_out = (x * w).sum(dim=-1)
+                        org_out = torch.einsum('ctgn,ctgn->ctg', x, w)
                         org_out_dict[i] = org_out
 
                     max_val = org_max_val * (1 - i_s / n_grid)
@@ -163,7 +163,7 @@ class AutoClipper:
                     )
                     q_x = self.fake_quantize_input(block_idx, x, layer_name)
 
-                    cur_out = (q_x * q_w).sum(dim=-1)
+                    cur_out = torch.einsum('ctgn,ctgn->ctg', q_x, q_w)
 
                     # co, 1, n_group, 1
                     err = (cur_out - org_out).pow(2).mean(dim=1).view(min_errs.shape)

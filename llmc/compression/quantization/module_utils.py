@@ -1051,8 +1051,8 @@ class FakeQuantLinear(nn.Module):
             x = self.a_qdq(x, self)
 
         if not hasattr(self, 'tmp_weight'):
-            tmp_weight = self.w_qdq(self)
-            self.register_buffer('tmp_weight', tmp_weight, persistent=False)
+            self.tmp_weight = self.w_qdq(self)
+            # self.register_buffer('tmp_weight', tmp_weight, persistent=False)
             self.tmp_bias = self.bias
 
         elif self.dynamic_quant_weight:
@@ -1061,6 +1061,11 @@ class FakeQuantLinear(nn.Module):
 
         elif self.dynamic_quant_tmp_weight:
             self.tmp_weight = self.w_qdq(self)
+            # self.tmp_bias = self.bias
+        # else:
+        #     tmp_weight = self.w_qdq(self)
+        #     # self.register_buffer('tmp_weight', tmp_weight, persistent=False)
+        #     tmp_bias = self.bias
 
         if self.fp8_forward:
             y = block_wise_fp8_forward_func(
@@ -1841,6 +1846,7 @@ _MODEL_LN_TYPES_PAIRS_ = {
     'Starcoder': LlmcLayerNorm,
     'Opt': LlmcLayerNorm,
     'Bloom': LlmcLayerNorm,
+    'Qwen25VL': LlmcQwen2RMSNorm,
 }
 
 

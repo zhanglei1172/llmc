@@ -1,0 +1,69 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL
+    path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp1/transformed_model/
+    tokenizer_mode: slow
+    torch_dtype: torch.float32
+calib:
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+    n_samples: 128
+    bs: 1
+    seq_len: 2048
+    preproc: wikitext2_gptq
+    seed: *seed
+eval:
+    eval_pos: [transformed, fake_quant]
+    name: wikitext2
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
+    # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
+    bs: 1
+    inference_per_block: False
+# ignored_layers:
+#     block_ids: [0-28]
+#     layer_names: ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj', 'self_attn.o_proj', 'mlp.gate_proj', 'mlp.up_proj']
+quant:
+    method: OmniQuant
+    weight:
+        bit: 4
+        symmetric: True
+        granularity: per_channel
+        calib_algo: learnable
+        ste: True
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_tensor
+        ste: True
+    special:
+        aug_loss: False
+        lwc: False
+        let: True
+        lwc_lr: 0.001
+        let_lr: 0.001
+        use_shift: False
+        alpha: 0.5
+        deactive_amp: True
+        epochs: 5
+        wd: 0
+        # Use AWQ's search clip factors to initialize OmniQuant's clip factors,
+        # Then refine them through learning (LWC).
+        search_clip_init: True
+        load_clip: True
+        clip_path: /code/tmp/clip
+        # Use AWQ's search scale factors to initialize OmniQuant's scale factors,
+        # Then refine them through learning (LET).
+        search_scale_init: True
+        scale_path: /code/tmp/scale
+        smooth_up_down: True
+        selected_layers: ['mlp.down_proj']
+    quant_out: True
+# save:
+#     save_trans: False
+#     save_fake: False
+#     save_path: ./save

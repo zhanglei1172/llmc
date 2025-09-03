@@ -109,8 +109,11 @@ class OSTQuant(SpinQuant):
         if isinstance(prev_op[0], tuple(_LLMC_LN_TYPES_ + _TRANSFORMERS_LN_TYPES_)):
             self.fuse_ln_fcs(prev_op[0], layers)
             if 'is_mlp' not in subset or not subset['is_mlp']:
-                Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
-                subset['inspect'].Q2 = RotateModule(Q2)
+                if self.rotate_mode == 'klt':
+                    Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads, block)
+                else:
+                    Q2 = torch.stack([self.get_orthogonal_matrix(self.hidden_size // self.num_heads) for _ in range(self.num_key_value_heads)], dim=0)
+                block.Q2 = RotateModule(Q2)
                 S_norm_qkv = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
                 S_qk = SmoothModule(torch.ones(layers_dict['self_attn.k_proj'].weight.shape[0]//2,dtype=torch.float32,device=self.dev)) # TODO //2 for 等价
                 S_ov = SmoothModule(torch.ones(layers_dict['self_attn.v_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
@@ -126,7 +129,7 @@ class OSTQuant(SpinQuant):
                 self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_qk, inverse_out=True, is_qk=True)
                 n = 'self_attn.v_proj'
                 m = layers_dict[n]
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=subset['inspect'].Q2, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_ov, inverse_out=False)
+                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=False, Sin=block.S_norm_qkv, Sout=block.S_ov, inverse_out=False)
 
                 args = {'Sout': S_norm_qkv}
                 params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
@@ -187,7 +190,7 @@ class OSTQuant(SpinQuant):
                 self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=True, Sin=block.S_up_down, inverse_out=False)
                 
             else:
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=True,Sin=block.S_ov)
+                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=True,Sin=block.S_ov)
                 # self.replace_rotate_sm_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
     
     def replace_rotate_sm_fc(self, block, n, m, Q1=None, Q2=None, transpose=False, Sin=None, Sout=None, inverse_out=False, is_qk=False):

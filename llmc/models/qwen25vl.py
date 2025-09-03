@@ -33,6 +33,9 @@ from .qwen25 import Qwen25
 class Qwen25VL(Qwen25):
     def __init__(self, config, device_map=None, use_cache=False):
         super().__init__(config, device_map, use_cache)
+        blocks = self.get_blocks()
+        for block in blocks:
+            block.self_attn.forward = torch.compile(block.self_attn.forward)
 
     def build_model(self):
         self.eval_name = 'Qwen25VLEval'
@@ -43,6 +46,8 @@ class Qwen25VL(Qwen25):
             if hasattr(self.vlm_model_config, 'use_cache'):
                 self.vlm_model_config.use_cache = False
         logger.info(f'self.vlm_model_config : {self.vlm_model_config}')
+        # from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLAttention
+        # Qwen2_5_VLAttention.forward = torch.compile(Qwen2_5_VLAttention.forward)
         self.vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             self.model_path,
             config=self.vlm_model_config,

@@ -44,24 +44,28 @@ class WeightRotater:
             tmp_weight, tmp_bias = self.rotate_func(weight, bias, Q1.weight, transpose)
 
             if Q2 is not None:
-                had_dim = Q2.weight.shape[0]
+                had_dim = Q2.weight.shape[-1]
                 dtype = tmp_weight.dtype
+                dev = tmp_weight.device
+                n = 1 if len(Q2.weight.shape) == 2 else Q2.weight.shape[0]
+                Q = Q2.weight.reshape(n, 1, had_dim, had_dim)
                 if transpose:
                     init_shape = tmp_weight.shape
-                    tmp_weight = tmp_weight.reshape(-1, init_shape[-1] // had_dim, had_dim)
-                    tmp_weight, _ = self.rotate_func(tmp_weight, bias, Q2.weight, False)
+                    tmp_weight = tmp_weight.reshape(init_shape[0], n, -1, had_dim)
+                    tmp_weight = torch.einsum('anrx,nrxy->anry', tmp_weight.to(dtype=torch.float64), Q.to(device=dev,dtype=torch.float64)).to(dtype=dtype, device=ROTATE_DEV)
                     tmp_weight = tmp_weight.reshape(init_shape)
                 else:
                     tmp_weight = tmp_weight.t()
                     transposed_shape = tmp_weight.shape
-                    tmp_weight = tmp_weight.reshape(-1, transposed_shape[-1] // had_dim, had_dim)
-                    tmp_weight, _ = self.rotate_func(tmp_weight, bias, Q2.weight, False)
+                    tmp_weight = tmp_weight.reshape(transposed_shape[0], n, -1, had_dim)
+                    tmp_weight = torch.einsum('anrx,nrxy->anry', tmp_weight.to(dtype=torch.float64), Q.to(device=dev,dtype=torch.float64)).to(dtype=dtype, device=ROTATE_DEV)
                     tmp_weight = tmp_weight.reshape(transposed_shape).t()
                 if bias is not None and not transpose:
                     dtype = bias.dtype
                     dev = bias.device
                     bias_shape = bias.shape
-                    tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
+                    tmp_bias = tmp_bias.reshape(n, -1, had_dim)
+                    tmp_bias = torch.einsum('nrx,nrxy->nry', tmp_bias.to(dtype=torch.float64), Q.to(device=dev,dtype=torch.float64)).to(dtype=dtype, device=ROTATE_DEV).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
 
         if Q1 is None and Q2 is None:
             tmp_weight = weight
@@ -83,24 +87,28 @@ class WeightRotaterSmooth:
             tmp_weight, tmp_bias = self.rotate_func(weight, bias, Q1.weight, transpose)
 
             if Q2 is not None:
-                had_dim = Q2.weight.shape[0]
+                had_dim = Q2.weight.shape[-1]
                 dtype = tmp_weight.dtype
+                dev = tmp_weight.device
+                n = 1 if len(Q2.weight.shape) == 2 else Q2.weight.shape[0]
+                Q = Q2.weight.reshape(n, 1, had_dim, had_dim)
                 if transpose:
                     init_shape = tmp_weight.shape
-                    tmp_weight = tmp_weight.reshape(-1, init_shape[-1] // had_dim, had_dim)
-                    tmp_weight, _ = self.rotate_func(tmp_weight, bias, Q2.weight, False)
+                    tmp_weight = tmp_weight.reshape(init_shape[0], n, -1, had_dim)
+                    tmp_weight = torch.einsum('anrx,nrxy->anry', tmp_weight.to(dtype=torch.float64), Q.to(device=dev,dtype=torch.float64)).to(dtype=dtype, device=ROTATE_DEV)
                     tmp_weight = tmp_weight.reshape(init_shape)
                 else:
                     tmp_weight = tmp_weight.t()
                     transposed_shape = tmp_weight.shape
-                    tmp_weight = tmp_weight.reshape(-1, transposed_shape[-1] // had_dim, had_dim)
-                    tmp_weight, _ = self.rotate_func(tmp_weight, bias, Q2.weight, False)
+                    tmp_weight = tmp_weight.reshape(transposed_shape[0], n, -1, had_dim)
+                    tmp_weight = torch.einsum('anrx,nrxy->anry', tmp_weight.to(dtype=torch.float64), Q.to(device=dev,dtype=torch.float64)).to(dtype=dtype, device=ROTATE_DEV)
                     tmp_weight = tmp_weight.reshape(transposed_shape).t()
                 if bias is not None and not transpose:
                     dtype = bias.dtype
                     dev = bias.device
                     bias_shape = bias.shape
-                    tmp_bias = torch.matmul(tmp_bias.reshape(bias_shape[-1] // had_dim, had_dim).to(device=dev, dtype=torch.float64), Q2.weight.to(device=dev, dtype=torch.float64)).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
+                    tmp_bias = tmp_bias.reshape(n, -1, had_dim)
+                    tmp_bias = torch.einsum('nrx,nrxy->nry', tmp_bias.to(dtype=torch.float64), Q.to(device=dev,dtype=torch.float64)).to(dtype=dtype, device=ROTATE_DEV).to(device=ROTATE_DEV, dtype=dtype).reshape(bias_shape)
 
         if Q1 is None and Q2 is None:
             tmp_weight = weight

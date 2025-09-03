@@ -97,6 +97,9 @@ def main(config):
 
         RCV_PARAMS = object_list[0]
         config.train.train_args.special.update(RCV_PARAMS)
+        if "warmup_steps" in RCV_PARAMS:
+            config.train.train_args.warmup_steps = RCV_PARAMS['warmup_steps']
+            config.train.train_args.max_steps = RCV_PARAMS['max_steps']
         deploy_all_modality(
             blockwise_opts,
             config['train']["train_state"] if config['train'].get("train_state") else blockwise_opts[-1].avaliable_train_state[0]
@@ -130,7 +133,7 @@ def main(config):
             eval_ress.update(eval_res)
         if int(os.environ['RANK']) == 0:
             # import nni
-            nni.report_final_result({"default":eval_ress['fake_quant']['wikitext2'], "loss": 0.0})
+            nni.report_final_result(eval_ress['fake_quant']['wikitext2'])
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant_wo_kv')
         if eval_res is not None:
             eval_ress.update(eval_res)

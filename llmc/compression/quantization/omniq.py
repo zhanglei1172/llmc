@@ -31,7 +31,7 @@ class OmniQuant(BaseBlockwiseQuantization):
 
         model_type = self.config['model']['type']
         if (
-            model_type not in ['Llama', 'Opt', 'Falcon', 'Mistral', 'Qwen2']
+            model_type not in ['Llama', 'Opt', 'Falcon', 'Mistral', 'Qwen2', 'Qwen25VL']
             and self.let
         ):
             raise ValueError('Only support for opt/llama/Llama-2/falcon/Mistral now')
@@ -43,24 +43,24 @@ class OmniQuant(BaseBlockwiseQuantization):
             else None
         )
 
-        if self.deactive_amp:
-            self.batch_mask = self._repeat_attention_mask()
-        else:
-            self.batch_mask = (
-                self._repeat_attention_mask().float()
-                if self.attention_mask is not None
-                else None
-            )
+        # if self.deactive_amp:
+        #     self.batch_mask = self._repeat_attention_mask()
+        # else:
+        #     self.batch_mask = (
+        #         self._repeat_attention_mask().float()
+        #         if self.attention_mask is not None
+        #         else None
+        #     )
 
         self.dev = torch.device('cuda')
         self.model_dtype = next(self.model.model.parameters()).dtype
 
-    def _repeat_attention_mask(self):
-        if self.attention_mask is not None:
-            return self.attention_mask.repeat(
-                self.input['data'][0].shape[0], 1, 1, 1
-            ).cuda()
-        return None
+    # def _repeat_attention_mask(self):
+    #     if self.attention_mask is not None:
+    #         return self.attention_mask.repeat(
+    #             self.input['data'][0].shape[0], 1, 1, 1
+    #         ).cuda()
+    #     return None
 
     def add_quant_config(self):
         config = self.quant_config['special']
@@ -76,7 +76,7 @@ class OmniQuant(BaseBlockwiseQuantization):
         self.search_clip_init = config.get('search_clip_init', False)
         self.smooth_up_down = config.get('smooth_up_down', False)
 
-        if self.smooth_up_down and self.config['model']['type'] == 'Llama':
+        if self.smooth_up_down:
             self.model.pairs['down_proj'] = 'down'
 
         if self.search_clip_init:
@@ -137,7 +137,7 @@ class OmniQuant(BaseBlockwiseQuantization):
                     'attention_mask'
                 ].cuda()
             with torch.no_grad():
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast(device_type="cuda", enabled=not self.deactive_amp):
                     out = block(input_data[i], **self.input['kwargs'][i])[0]
                     output.append(out)
         return output
@@ -171,6 +171,8 @@ class OmniQuant(BaseBlockwiseQuantization):
             for index, subset in enumerate(subsets):
                 prev_op = subset['prev_op']
                 layers_dict = subset['layers']
+                if self.selected_layers and subset['input'] not in self.selected_layers:
+                    continue
                 self.subset_transform(block, layers_dict, prev_op)
 
         self.clear_tmp(block)
@@ -200,16 +202,16 @@ class OmniQuant(BaseBlockwiseQuantization):
                     if self.let:
                         self.smooth_tmp_weight(block)
 
-                    if self.position_ids is not None:
-                        quant_out = block(
-                            self.input['data'][i],
-                            attention_mask=self.batch_mask,
-                            position_ids=self.position_ids,
-                        )[0]
-                    else:
-                        quant_out = block(
-                            self.input['data'][i], attention_mask=self.batch_mask
-                        )[0]
+                    # if self.position_ids is not None:
+                    #     quant_out = block(
+                    #         self.input['data'][i],
+                    #         attention_mask=self.batch_mask,
+                    #         position_ids=self.position_ids,
+                    #     )[0]
+                    # else:
+                    quant_out = block(
+                        self.input['data'][i], **self.input['kwargs'][i]
+                    )[0]
 
                     loss = self.loss_func(self.ori_out[i], quant_out)
                     if self.aug_loss:
@@ -251,6 +253,8 @@ class OmniQuant(BaseBlockwiseQuantization):
             if len(shift) and shift[0] is not None:
                 self.apply_shift(shift[0], prev_op, layers)
             scale = scale[0]
+            if scale.numel() == 0:
+                return
             scale.data = self.truncate(scale)
             self.apply_scale(scale, prev_op, layers)
         else:
@@ -290,6 +294,9 @@ class OmniQuant(BaseBlockwiseQuantization):
     def register_lwc_parameters(self, block, input_feat, init_value=4.0):
         for n, m in block.named_modules():
             if isinstance(m, FakeQuantLinear):
+                if self.selected_layers and n not in self.selected_layers:
+                    logger.info(f'Skipping layer {n} as it is not in selected layers.')
+                    continue
                 if self.search_clip_init:
                     low_param, up_param = self.get_clip_parameters(input_feat, n, m)
                 else:
@@ -343,6 +350,9 @@ class OmniQuant(BaseBlockwiseQuantization):
 
         for n, m in block.named_modules():
             if isinstance(m, FakeQuantLinear):
+                if self.selected_layers and n not in self.selected_layers:
+                    logger.info(f'Skipping layer {n} as it is not in selected layers.')
+                    continue
                 for key in self.model.pairs.keys():
                     if key in n:
                         scale, shift = self.get_weight_scale_shift(m, n)
@@ -363,19 +373,20 @@ class OmniQuant(BaseBlockwiseQuantization):
                 m.dynamic_quant_tmp_weight = True
 
     def get_clip_parameters(self, input_feat, n, m):
-        if any([_ in n for _ in ['q_', 'k_', 'query', 'key', 'Wqkv']]):
-            up_param = None
-            low_param = None
-            return low_param, up_param
+        # if any([_ in n for _ in ['q_', 'k_', 'query', 'key', 'Wqkv']]):
+        #     up_param = None
+        #     low_param = None
+        #     return low_param, up_param
 
         if self.load_clip:
             logger.info('Load Searched clip...')
             logger.info(f'clip layer {n}')
-            layer_name = f'{self.model.block_name_prefix}.{self.block_idx}.{n}'
+            # layer_name = f'{self.model.block_name_prefix}.{self.block_idx}.{n}'
+            layer_name = f'{n}.weight_quantizer.'
             logger.info(layer_name)
-            up_factor = self.weight_clips[layer_name]['up_factor'].float().cuda()
+            up_factor = self.weight_clips[self.block_idx][layer_name+'upbound_factor'].float().cuda()
 
-            low_factor = self.weight_clips[layer_name]['low_factor']
+            low_factor = self.weight_clips[self.block_idx][layer_name+'lowbound_factor']
             if low_factor is not None:
                 low_factor = low_factor.float().cuda()
 
@@ -515,6 +526,12 @@ class OmniQuant(BaseBlockwiseQuantization):
             scale = (act.pow(self.alpha) / weight.half().pow(1 - self.alpha)).clamp(
                 min=1e-5
             )
+        else:
+            scale = torch.ones(
+                            weight.data.shape[0],
+                            device=self.dev,
+                            dtype=self.dtype,
+                        )
 
         if self.use_shift:
             shift = self.act_shifts[f'{self.prefix}.{self.block_idx}.{name}'].to(
@@ -564,40 +581,53 @@ class OmniQuant(BaseBlockwiseQuantization):
 
         qkv_layers = [subsets[0]['layers'][name] for name in subsets[0]['layers']]
 
-        self.smooth_ln_fcs_tmp(
-            layer_norms[0],
-            qkv_layers,
-            block.qkv_smooth_scale,
-            block.qkv_smooth_shift,
-        )
-        self.smooth_ln_fcs_tmp(
-            layer_norms[1],
-            [subsets[2]['layers'][name] for name in subsets[2]['layers']],
-            block.fc1_smooth_scale,
-            block.fc1_smooth_shift,
-        )
-        self.smooth_fc_fc_tmp(
-            subsets[1]['prev_op'][0],
-            subsets[1]['inspect'],
-            block.out_smooth_scale,
-            block.out_smooth_shift,
-        )
+        if hasattr(block, 'qkv_smooth_scale') and block.qkv_smooth_scale.numel():
+            self.smooth_ln_fcs_tmp(
+                layer_norms[0],
+                qkv_layers,
+                block.qkv_smooth_scale,
+                block.qkv_smooth_shift,
+            )
+        else:
+            for l in qkv_layers:
+                l.tmp_weight = l.weight * 1
+        if hasattr(block, 'fc1_smooth_scale') and block.fc1_smooth_scale.numel():
+            self.smooth_ln_fcs_tmp(
+                layer_norms[1],
+                [subsets[2]['layers'][name] for name in subsets[2]['layers']],
+                block.fc1_smooth_scale,
+                block.fc1_smooth_shift,
+            )
+        else:
+            for l in [subsets[2]['layers'][name] for name in subsets[2]['layers']]:
+                l.tmp_weight = l.weight * 1
+        if hasattr(block, 'out_smooth_scale') and block.out_smooth_scale.numel():
+            self.smooth_fc_fc_tmp(
+                subsets[1]['prev_op'][0],
+                subsets[1]['inspect'],
+                block.out_smooth_scale,
+                block.out_smooth_shift,
+            )
+        else:
+            subsets[1]['inspect'].tmp_weight = subsets[1]['inspect'].weight * 1
 
-        if self.smooth_up_down:
+        if self.smooth_up_down and block.down_smooth_scale.numel():
             self.smooth_fc_fc_tmp(
                 subsets[3]['prev_op'][0],
                 subsets[3]['inspect'],
                 block.down_smooth_scale,
                 None,
             )
+        else:
+            subsets[3]['inspect'].tmp_weight = subsets[3]['inspect'].weight * 1
 
         self.smooth_q_k_tmp(qkv_layers[0], qkv_layers[1], block.qkt_smooth_scale)
-        subsets[3]['inspect'].tmp_weight = subsets[3]['inspect'].weight
+        
 
         for name, module in block.named_modules():
             if isinstance(module, FakeQuantLinear):
                 if not hasattr(module, 'tmp_bias'):
-                    module.tmp_bias = module.bias
+                    module.tmp_bias = module.bias.data if module.bias is not None else None
 
     def smooth_ln_fcs_tmp(self, ln, fcs, scales, shifts):
         ln.use_tmp_parameter = True
@@ -609,6 +639,8 @@ class OmniQuant(BaseBlockwiseQuantization):
                 ln.tmp_bias = (ln.bias - shifts) / scales
             else:
                 ln.tmp_bias = (-1 * shifts) / scales
+        else:
+            ln.tmp_bias = ln.bias.data if ln.bias is not None else None
 
         ln.tmp_weight = ln.weight / scales
 
@@ -622,8 +654,9 @@ class OmniQuant(BaseBlockwiseQuantization):
 
     def smooth_fc_fc_tmp(self, fc1, fc2, scales, shifts):
         if fc1.out_features != fc2.in_features:
-            fc1.tmp_weight = fc1.weight
-            fc2.tmp_weight = fc2.weight
+            if not hasattr(fc1, 'tmp_weight'):
+                fc1.tmp_weight = fc1.weight * 1
+            fc2.tmp_weight = fc2.weight * 1
             return
 
         if hasattr(fc1, 'tmp_weight'):
@@ -680,15 +713,32 @@ class OmniQuant(BaseBlockwiseQuantization):
         if hasattr(module, 'buf_upbound_factor'):
             args['upbound_factor'] = module.buf_upbound_factor
 
-        if module.dynamic_quant_weight:
+        if getattr(module, "dynamic_quant_weight", False):
             return wquantizer.fake_quant_weight_dynamic(module.weight, args)
 
-        elif module.dynamic_quant_tmp_weight:
+        elif getattr(module, "dynamic_quant_tmp_weight", False):
             return wquantizer.fake_quant_weight_dynamic(module.tmp_weight, args)
         else:
             return wquantizer.fake_quant_weight_dynamic(module.weight, args)
 
     def deploy(self, quant_format):
+        # for module in self.model.modality_model.modules:
+        #     if not isinstance(module, FakeQuantLinear):
+        #         continue
+        #     args = {
+        #         "upbound_factor": module.get("buf_upbound_factor"),
+        #         "lowbound_factor": module.get("buf_lowbound_factor"),
+        #     }
+        #     w = module.weight.data
+        #     org_w_shape = w.shape
+        #     org_w_dtype = w.dtype
+        #     w = self.wquantizer.reshape_tensor(w)
+        #     min_, max_ = self.wquantizer.get_tensor_range(w, args=args)
+        #     w = torch.clamp(w, min_, max_)
+        #     w = self.wquantizer.restore_tensor(w, org_w_shape).to(org_w_dtype)
+        #     module.weight.data = w
+        #     del module.buf_upbound_factor
+            
         super().deploy(quant_format)
         self.model.convert_dtype(self.model_dtype)
 

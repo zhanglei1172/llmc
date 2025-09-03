@@ -14,6 +14,19 @@ try:
 except:
     logger.warning("Failed to import Qwen model components")
 
+class LlmcQDQ(nn.Module):
+    def __init__(self, a_qdq=None):
+        super().__init__()
+        self.a1_qdq = a_qdq
+        self.calib = True
+
+    def forward(self, x1):
+        if self.a1_qdq is not None and not self.calib:
+            x1 = self.a1_qdq(x1, self)
+        return x1
+
+    def __repr__(self):
+        return f'LlmcQDQ(calib={self.calib})'
 
 
 class LlmcMatmul(nn.Module):
@@ -456,6 +469,9 @@ class LlmcQwen2_5_VLAttention(nn.Module):
         self.rotary_emb = ori_module.rotary_emb
         self.matmul_1 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
         self.matmul_2 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
+        # self.qdq1 = LlmcQDQ(a_qdq=matmul_a1_qdq)
+        # self.qdq2 = LlmcQDQ(a_qdq=matmul_a2_qdq)
+        # self.qdq3 = LlmcQDQ(a_qdq=matmul_a2_qdq)
         self.softmax = LlmcSoftmax(softmax_a_qdq)
         
 
@@ -489,9 +505,11 @@ class LlmcQwen2_5_VLAttention(nn.Module):
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # repeat k/v heads if n_kv_heads < n_heads
-        attn_output, attn_weights = self._atten_func(query_states, key_states, value_states, attention_mask, output_attentions)
-
+        if self.config._attn_implementation == "eager":
+            # repeat k/v heads if n_kv_heads < n_heads
+            attn_output, attn_weights = self._atten_func(query_states, key_states, value_states, attention_mask, output_attentions)
+        else:
+            raise NotImplementedError
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
                 f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"

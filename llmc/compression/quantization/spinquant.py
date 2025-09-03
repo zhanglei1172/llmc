@@ -106,6 +106,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         self.rotate_mode = self.quant_config['special']['rotate_mode']
         self.weight_rotate = True
         self.w_rotater = WeightRotater(weight_rotate_func=self.rotate_weight, dev=self.dev)
+        self.lwc = self.quant_config['special'].get('lwc', False)
         # self.o_proj_group_quant = self.quant_config['special']['o_proj_group_quant']
 
     def preprocess(self):
@@ -314,13 +315,74 @@ class SpinQuant(BaseBlockwiseQuantization):
             )
             vision_embed.cpu()
 
-    def get_orthogonal_matrix(self, size):
+    def get_orthogonal_matrix(self, size, layer=None):
         if self.rotate_mode == 'random':
             return random_orthogonal_matrix(size, self.dev)
         elif self.rotate_mode == 'hadamard':
             return random_hadamard_matrix(size, self.dev)
+        elif self.rotate_mode == 'klt':
+            if layer is None:
+                params = []
+                for block in self.blocks:
+                    q,k,v,up,gate = block.self_attn.q_proj,block.self_attn.k_proj,block.self_attn.v_proj,block.mlp.up_proj,block.mlp.gate_proj
+                    for m in (q,k,v,up,gate):
+                        params.append(m.weight)
+                params = torch.cat(params,dim=0)
+                params = params-params.mean(dim=0)
+                cov_matrix = torch.cov(params.float().T) 
+                eigs,eiv =  torch.linalg.eigh(cov_matrix)
+                H = random_hadamard_matrix(params.size(-1),self.dev) 
+                return (eiv.to(self.dev).double()@H).float()
+            else:
+                head_dim = size
+                o,v = layer.self_attn.o_proj,layer.self_attn.v_proj
+                oc,ic = o.weight.shape
+                flat_wo  = o.weight.reshape(oc,self.num_key_value_heads,-1,head_dim)
+                ret = list()
+                for i in range(self.num_key_value_heads):
+                    params = flat_wo[:,i].reshape(-1,head_dim) 
+                    params = params-params.mean(dim=0) 
+                    cov_matrix = torch.cov(params.float().T)
+                    eigs,eiv = torch.linalg.eigh(cov_matrix)
+                    H = random_hadamard_matrix(params.size(-1),o.weight.device)
+                    ret.append((eiv.to(self.dev).double()@H).float())
+                return torch.stack(ret, dim=0)
         else:
             raise ValueError(f'Unsupported mode {self.mode}')
+
+    def register_lwc_parameters(self, layers, init_value=4.0):
+        for m in layers:
+            if self.wquantizer.granularity == 'per_group':
+                dim = int(
+                    m.weight.data.shape[0]
+                    * math.ceil(
+                        m.weight.data.shape[1] / self.wquantizer.group_size
+                    )
+                )
+            else:
+                dim = m.weight.data.shape[0]
+            if self.wquantizer.sym:
+                low_param = None
+            else:
+                low_param = nn.Parameter(
+                    torch.ones(
+                        (dim, 1),
+                        device=self.dev,
+                        dtype=self.dtype,
+                    )
+                    * init_value
+                )
+            up_param = nn.Parameter(
+                torch.ones(
+                    (dim, 1),
+                    device=self.dev,
+                    dtype=self.dtype,
+                )
+                * init_value
+            )
+
+        m.register_parameter('buf_upbound_factor', up_param)
+        m.register_parameter('buf_lowbound_factor', low_param)
 
     def block_transform(self, block):
         logger.info(f'Start transform the {self.block_idx+1}-th block')
@@ -328,6 +390,8 @@ class SpinQuant(BaseBlockwiseQuantization):
         subsets = self.model.get_subsets_in_block(block)
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
+            if self.lwc:
+                self.register_lwc_parameters(subset['layers'].values())
 
         self.set_non_linear_mode('fake_quant', block, False)
         self.model.replace_module_block(LlmcRMSNorm, block, self.block_idx, {})
@@ -352,8 +416,11 @@ class SpinQuant(BaseBlockwiseQuantization):
                 m = layers_dict[n]
                 self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False)
             if 'is_mlp' not in subset or not subset['is_mlp']:
-                Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
-                subset['inspect'].Q2 = RotateModule(Q2)
+                if self.rotate_mode == 'klt':
+                    Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads, block)
+                else:
+                    Q2 = torch.stack([self.get_orthogonal_matrix(self.hidden_size // self.num_heads) for _ in range(self.num_key_value_heads)], dim=0)
+                block.Q2 = RotateModule(Q2)
 
         else:
             if self.config['model']['type'] in ['Opt']:
@@ -366,8 +433,8 @@ class SpinQuant(BaseBlockwiseQuantization):
                     apply_exact_had_to_linear(m, had_dim=-1, output=False)
                 self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=True)
             else:
-                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=True)
-                self.replace_rotate_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
+                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=True)
+                self.replace_rotate_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=False)
 
 
     def _get_block_Q2(self, block):

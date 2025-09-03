@@ -75,6 +75,10 @@ class BaseDataset(metaclass=ABCMeta):
                 self.calib_dataset = load_dataset(
                     'HuggingFaceH4/ultrachat_200k', split='train_sft'
                 )
+            elif self.calib_dataset_name == 'deita-6k':
+                self.calib_dataset = load_dataset("hkust-nlp/deita-6k-v0", split = "train")
+            elif self.calib_dataset_name == 'deita-10k':
+                self.calib_dataset = load_dataset("hkust-nlp/deita-10k-v0", split = "train")
             else:
                 raise Exception(f'Not support {self.calib_dataset_name} dataset.')
         else:
