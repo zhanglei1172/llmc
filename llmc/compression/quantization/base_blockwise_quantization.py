@@ -46,6 +46,7 @@ from .quant import FloatQuantizer, IntegerQuantizer, Weight48IntegerQuantizer
 class BaseBlockwiseQuantization(BlockwiseOpt):
     def __init__(self, model, quant_config, input, padding_mask, config):
         super().__init__(model, quant_config, input, padding_mask, config)
+        self._registered_kv_cache = False
         self.set_quant_config()
 
     def w_qdq(self, module, wquantizer):
@@ -234,8 +235,8 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             kv_special_cfg = self.quant_config['kvcache'].get('special', {})
             act_static_cfg = {}
             if self.act_static:
-                act_static_cfg.update(self.config.calib.n_sample)
-                act_static_cfg.update(self.config.calib.bs)
+                act_static_cfg['num_samples'] = self.config.calib.n_samples
+                act_static_cfg['bsz'] = self.config.calib.bs
             kv_quant_type = self.quant_config['kvcache'].get('quant_type', 'int-quant')
             self.kv_module = KV_REGISTRY[self.quant_config['kvcache']['method']](
                 kv_quant_type, self.quant_config['kvcache'],
@@ -623,6 +624,9 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
 
     @torch.no_grad()
     def register_kv_cache(self, block):
+        if self._registered_kv_cache:
+            return
+        self._registered_kv_cache = True
         attn_layers_dict = self.model.get_attn_in_block(block)
         attn_layer = attn_layers_dict[list(attn_layers_dict.keys())[0]]
         setattr(attn_layer, 'kvcache', self.kv_module)

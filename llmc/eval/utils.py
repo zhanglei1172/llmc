@@ -157,7 +157,7 @@ def eval_model(model, blockwise_opts, eval_list, eval_pos):
             if eval_pos == "transformed":
                 deploy_all_modality(blockwise_opts, "origin_float")
             elif eval_pos in ["fake_quant", "fake_quant_wo_kv"]:
-                deploy_all_modality(blockwise_opts, "fake_quant")
+                deploy_all_modality(blockwise_opts, eval_pos)
             elif eval_pos in [
                 "stat_fake_quant_qdq", 
                 "stat_fake_quant_graph",

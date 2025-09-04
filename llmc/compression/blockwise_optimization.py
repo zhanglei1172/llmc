@@ -74,10 +74,11 @@ class BlockwiseOpt(metaclass=ABCMeta):
                 )
                 kwargs['cache_position'] = cache_position
                 position_ids = cache_position.unsqueeze(0)
-                kwargs['position_ids'] = position_ids
-                if 'position_embeddings' in kwargs:
+                if 'position_ids' not in kwargs:
+                    kwargs['position_ids'] = position_ids
+                if 'position_embeddings' not in kwargs:
                     kwargs['position_embeddings'] = self.model.rotary_emb(
-                        kwargs['hidden_states'], position_ids
+                        kwargs['hidden_states'], kwargs['position_ids']
                     )
             if kwargs['hidden_states'].shape[1] == 1:
                 from .sparsification.kvsparse import ShadowKVCache

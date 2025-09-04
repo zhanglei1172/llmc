@@ -25,6 +25,8 @@ class NaiveQuantKVCache(DynamicCache):
 
         self.kvquant_cfg = kvquant_cfg
         self.static = kvquant_cfg.get('static', False)
+        self.quantize_k = kvquant_cfg.get('quantize_k', True)
+        self.quantize_v = kvquant_cfg.get('quantize_v', True)
         self._quantized_key_cache = []
         self._quantized_value_cache = []
         self.use_org_kv = False
@@ -59,18 +61,18 @@ class NaiveQuantKVCache(DynamicCache):
 
             if len(self._quantized_key_cache) <= layer_idx:
                 # Prefill
-                q_keys = self._quantize(key_states.contiguous(), layer_idx, is_key=True)
+                q_keys = self._quantize(key_states.contiguous(), layer_idx, is_key=True) if self.quantize_k else key_states
                 q_values = self._quantize(
                     value_states.contiguous(), layer_idx, is_key=False
-                )
+                ) if self.quantize_v else value_states
                 self._quantized_key_cache.append(q_keys)
                 self._quantized_value_cache.append(q_values)
-                keys_to_return = self._dequantize(q_keys)
-                values_to_return = self._dequantize(q_values)
+                keys_to_return = self._dequantize(q_keys) if self.quantize_k else q_keys
+                values_to_return = self._dequantize(q_values) if self.quantize_v else q_values
             else:
                 # Decode
-                dequant_key = self._dequantize(self._quantized_key_cache[layer_idx])
-                dequant_value = self._dequantize(self._quantized_value_cache[layer_idx])
+                dequant_key = self._dequantize(self._quantized_key_cache[layer_idx]) if self.quantize_k else self._quantized_key_cache[layer_idx]
+                dequant_value = self._dequantize(self._quantized_value_cache[layer_idx]) if self.quantize_v else self._quantized_value_cache[layer_idx]
                 keys_to_return = [dequant_key, key_states]
                 values_to_return = [dequant_value, value_states]
 
@@ -79,10 +81,10 @@ class NaiveQuantKVCache(DynamicCache):
 
                 self._quantized_key_cache[layer_idx] = self._quantize(
                     keys_to_return.contiguous(), layer_idx, is_key=True
-                )
+                ) if self.quantize_k else keys_to_return
                 self._quantized_value_cache[layer_idx] = self._quantize(
                     values_to_return.contiguous(), layer_idx, is_key=False
-                )
+                ) if self.quantize_v else values_to_return
 
         return keys_to_return, values_to_return
 
@@ -103,24 +105,27 @@ class NaiveQuantKVCache(DynamicCache):
 
         if self._check_pass_all_calib_data(layer_idx):
             # Get and store calibration parameters for keys and values
-            for data, buffer, scale_buffer, zero_buffer, qmin_buffer, qmax_buffer in [
-                (
+            calibration_tasks = []
+            if self.quantize_k:
+                calibration_tasks.append((
                     self.calib_key_cache[layer_idx],
                     self.k_scales_buffer,
                     self.k_scales_buffer,
                     self.k_zeros_buffer,
                     self.k_qmin_buffer,
                     self.k_qmax_buffer,
-                ),
-                (
+                ))
+            if self.quantize_v:
+                calibration_tasks.append((
                     self.calib_value_cache[layer_idx],
                     self.v_scales_buffer,
                     self.v_scales_buffer,
                     self.v_zeros_buffer,
                     self.v_qmin_buffer,
                     self.v_qmax_buffer,
-                ),
-            ]:
+                ))
+            
+            for data, buffer, scale_buffer, zero_buffer, qmin_buffer, qmax_buffer in calibration_tasks:
                 scales, zeros, qmin, qmax = self.get_qparams(data)
                 (
                     scale_buffer[layer_idx],
@@ -164,7 +169,7 @@ class NaiveQuantKVCache(DynamicCache):
                 tensor_range, tensor.device
             )
 
-        q_tensor = self.kvquantizer.quant(tensor, scales, zeros, qmax, qmin)
+        q_tensor = self.kvquantizer.quant(tensor, scales.to(tensor.device), zeros.to(tensor.device), qmax.to(tensor.device), qmin.to(tensor.device))
         q_tensor = self.kvquantizer.restore_tensor(q_tensor, org_shape)
 
         q_tensors = {
@@ -246,10 +251,10 @@ class KiviQuantKVCache(NaiveQuantKVCache):
             if len(self.key_cache) <= layer_idx:
                 self._quantized_key_cache.append(self._quantize(key_states.contiguous(),
                                                                 layer_idx,
-                                                                is_key=True))
+                                                                is_key=True) if self.quantize_k else key_states)
                 self._quantized_value_cache.append(self._quantize(value_states.contiguous(),
                                                                   layer_idx,
-                                                                  is_key=False))
+                                                                  is_key=False) if self.quantize_v else value_states)
                 self.key_cache.append(torch.zeros(0,
                                                   dtype=key_states.dtype,
                                                   device=key_states.device))
@@ -258,8 +263,8 @@ class KiviQuantKVCache(NaiveQuantKVCache):
                                                     device=key_states.device))
                 keys_to_return, values_to_return = key_states, value_states
             else:
-                dequant_key = self._dequantize(self._quantized_key_cache[layer_idx])
-                dequant_value = self._dequantize(self._quantized_value_cache[layer_idx])
+                dequant_key = self._dequantize(self._quantized_key_cache[layer_idx]) if self.quantize_k else self._quantized_key_cache[layer_idx]
+                dequant_value = self._dequantize(self._quantized_value_cache[layer_idx]) if self.quantize_v else self._quantized_value_cache[layer_idx]
                 keys_to_return = [dequant_key, self.key_cache[layer_idx], key_states]
                 values_to_return = [dequant_value, self.value_cache[layer_idx], value_states]
 
@@ -270,10 +275,10 @@ class KiviQuantKVCache(NaiveQuantKVCache):
                     and self.key_cache[layer_idx].shape[-2] + 1 >= self.residual_length
                 ):
                     self._quantized_key_cache[layer_idx] = \
-                        self._quantize(keys_to_return.contiguous(), layer_idx, is_key=True)
+                        self._quantize(keys_to_return.contiguous(), layer_idx, is_key=True) if self.quantize_k else keys_to_return
                     self._quantized_value_cache[layer_idx] = self._quantize(
                         values_to_return.contiguous(), layer_idx, is_key=False
-                    )
+                    ) if self.quantize_v else values_to_return
                     self.key_cache[layer_idx] = torch.zeros(0,
                                                             dtype=key_states.dtype,
                                                             device=key_states.device)
