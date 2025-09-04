@@ -10,10 +10,11 @@ set -xe
 model_path=$2 #'/workspace/gaoy25@xiaopeng.com/v4_datas/v4_ckpts/v12-20250731-232339/checkpoint-17540/'
 flag="$(basename "$(dirname "$model_path")"/)"
 
-# prec=w8a8 # w8a8 w4a8 w4a16
+# prec=w8a8 # w8a8 w4a8 w4afp16
 
 ####
-precs=('w4afp16' 'w8a8')
+# precs=('w4afp16' 'w8a8')
+precs=('w4afp16')
 for prec in ${precs[@]}
 do
     echo ./log/test/log_v4-rtn_0807-${prec}_${flag}_.log

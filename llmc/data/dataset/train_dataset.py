@@ -41,7 +41,7 @@ class TrainJsonDataset(torch.utils.data.IterableDataset):
             for k in keys:
                 if k not in d:
                     d[k] = None
-        # np.random.shuffle(self.data)  # Shuffle the dataset
+        np.random.shuffle(self.data)  # Shuffle the dataset
         # self.data = [
         #     dict(input_ids=self.input_ids[i], labels=self.labels[i],
         #          attention_mask=self.attention_mask[i])

@@ -6,10 +6,11 @@ export HF_DATASETS_CACHE="/workspace/zhangl98@xiaopeng.com/hf_cache/"
 
 set -xe
 
+PYTHONPATH='.' llmc=./llmc ${python_path} -m torch.distributed.run --nnode 1 --nproc_per_node 2 --rdzv_id 1175 --rdzv_backend c10d --rdzv_endpoint localhost:12358 ./llmc/__main__.py --config configs/quantization/combination/quarot_comb_gptq/w8a8/v4_test_step_1_spinquant_fsdp.yml --task_id 1175 > log_spinqunat.log 2>&1
+
 # huggingface-cli login first
 PYTHONPATH='.' llmc=./llmc ${python_path} -m torch.distributed.run --nnode 1 --nproc_per_node 1 --rdzv_id 1175 --rdzv_backend c10d --rdzv_endpoint localhost:12358 ./llmc/__main__.py --config configs/quantization/combination/quarot_comb_gptq/w8a8/v4_test_step_0_vision_quarot.yml --task_id 1175  > log_vit_quarot.log 2>&1
 
-PYTHONPATH='.' llmc=./llmc ${python_path} -m torch.distributed.run --nnode 1 --nproc_per_node 2 --rdzv_id 1175 --rdzv_backend c10d --rdzv_endpoint localhost:12358 ./llmc/__main__.py --config configs/quantization/combination/quarot_comb_gptq/w8a8/v4_test_step_1_spinquant_fsdp.yml --task_id 1175 > log_spinqunat.log 2>&1
 
 PYTHONPATH='.' llmc=./llmc ${python_path} -m torch.distributed.run --nnode 1 --nproc_per_node 1 --rdzv_id 1175 --rdzv_backend c10d --rdzv_endpoint localhost:12358 ./llmc/__main__.py --config configs/quantization/combination/quarot_comb_gptq/w8a8/v4_test_step_2_gptq.yml --task_id 1175  > log_gptq.log 2>&1
 

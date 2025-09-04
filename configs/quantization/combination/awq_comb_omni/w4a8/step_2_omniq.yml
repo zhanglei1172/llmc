@@ -42,26 +42,26 @@ quant:
         ste: True
     special:
         aug_loss: False
-        lwc: False
-        let: True
+        lwc: True
+        let: False
         lwc_lr: 0.001
         let_lr: 0.001
         use_shift: False
         alpha: 0.5
         deactive_amp: True
-        epochs: 5
+        epochs: 15
         wd: 0
         # Use AWQ's search clip factors to initialize OmniQuant's clip factors,
         # Then refine them through learning (LWC).
         search_clip_init: True
-        load_clip: True
+        load_clip: False
         clip_path: /code/tmp/clip
         # Use AWQ's search scale factors to initialize OmniQuant's scale factors,
         # Then refine them through learning (LET).
-        search_scale_init: True
+        search_scale_init: False
         scale_path: /code/tmp/scale
         smooth_up_down: True
-        selected_layers: ['mlp.down_proj']
+        # selected_layers: ['mlp.down_proj']
     quant_out: True
 # save:
 #     save_trans: False

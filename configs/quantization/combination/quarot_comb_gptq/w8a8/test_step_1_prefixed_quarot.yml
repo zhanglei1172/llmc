@@ -27,7 +27,7 @@ prequant:
         symmetric: True
         granularity: per_token
     special:
-        prefixed_tokens: [6802, 151645]
+        prefixed_tokens: [15, 151645]
         prefixed_kv_path: 
 quant:
     method: Quarot
@@ -45,8 +45,8 @@ quant:
         rotate_mode: hadamard
         fp32_had: True
         online_rotate: False
-save:
-    # Save the Quarot-transformed model.
-    save_trans: True
-    save_fake: False
-    save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_prefixed_quarot
+# save:
+#     # Save the Quarot-transformed model.
+#     save_trans: True
+#     save_fake: False
+#     save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_prefixed_quarot

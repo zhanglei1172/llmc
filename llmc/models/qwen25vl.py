@@ -131,7 +131,7 @@ class Qwen25VL(Qwen25):
                 self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
                 for msg in messages
             ]
-            if calib_or_eval == 'calib' and self.config['calib'].get('add_answer', False):
+            if calib_or_eval == 'calib' and calib_cfg.get('add_answer', False):
                 texts = [
                     texts[n] + answers[n]
                     for n in range(len(texts))

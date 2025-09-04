@@ -215,21 +215,21 @@ class MyTrainer(Trainer):
                 k = 1000 
             else:
                 k = int(loss_type.split("_")[-1])
-            ori_logits = self.get_ori_outputs(model, inputs).logits
+            ori_logits = self.get_ori_outputs(model, inputs).logits *(labels != -100).unsqueeze(-1)
             outputs = model(**inputs)
-            logits = outputs.logits
+            logits = outputs.logits *(labels != -100).unsqueeze(-1)
             top_ori_logits, indices = ori_logits.topk(k, dim=-1, sorted=False)
             if getattr(args, "post_attn", False):
                 ref = F.softmax(ori_logits,dim=-1).gather(-1,indices).flatten(0,-2)
                 can = F.log_softmax(logits,dim=-1).gather(-1,indices).flatten(0,-2)
-                loss = F.kl_div(can,ref,reduction="batchmean")
+                loss = F.kl_div(can,ref,reduction="batchmean") * labels.numel() / (labels != -100).sum()
             else:
                 top_logits = logits.gather(-1, indices)
                 loss = F.kl_div(
                     F.log_softmax(top_logits, dim=-1).flatten(0, -2),
                     F.softmax(top_ori_logits, dim=-1).flatten(0, -2),
                     reduction="batchmean",
-                )
+                ) * labels.numel() / (labels != -100).sum()
             return loss
 
 

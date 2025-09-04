@@ -1,9 +1,9 @@
 base:
     seed: &seed 0
 model:
-    type: Qwen25VL_V4
-    path: /dataset/workspace/zhangl98/v4-0807/w4a16/spinquant_gptq/fake_quant_model/ 
-    torch_dtype: torch.float16
+    type: Qwen25VL
+    path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp2/transformed_model/
+    torch_dtype: torch.float32
 # calib:
 #     name: wikitext2
 #     download: False
@@ -16,7 +16,8 @@ model:
 eval:
 #   - eval_pos: ["stat_fake_quant_qdq", "stat_fake_quant_graph", "stat_fake_quant_subset", "stat_fake_quant_block"]
     - 
-        eval_pos: [ "stat_fake_quant_graph", "stat_fake_quant_subset"]
+        eval_pos: ["fake_quant"]
+        # eval_pos: ["fake_quant", "stat_fake_quant_graph", "stat_fake_quant_subset"]
         name: wikitext2
         type: ppl
         download: False
@@ -24,48 +25,48 @@ eval:
         seq_len: 2048
         bs: 1
         inference_per_block: False
-        num_samples: 2
-    - 
-        eval_pos: [ "stat_fake_quant_graph", "stat_fake_quant_subset"]
-        type: v4
-        name: oms
-        download: False
-        path: ./xq_eval/datasets_v4/test_v2_6_mixed_refined_0617v6-相对坐标-right-560px.json
-        limit: 2
-        bs: 1
-        seq_len: 2048
-        seed: *seed
-    - 
-        eval_pos:  [ "stat_fake_quant_graph", "stat_fake_quant_subset"]
-        type: vqa
-        name: [mmmu]
-        download: False
-        path: /workspace/lim42@xiaopeng.com/dataset/mme/
-        bs: 1
-        limit: 2  # Limit test num for evaluation
-        inference_per_block: False
-    - 
-        eval_pos: ["stat_fake_quant_graph", "stat_fake_quant_subset"]
-        type: v4
-        name: feedback
-        download: False
-        path: ./xq_eval/datasets_v4/val_memory_v3_002.json
-        limit: 2
-        bs: 1
-        seq_len: 2048
-        seed: *seed
-    - 
-        eval_pos: ["stat_fake_quant_graph", "stat_fake_quant_subset"]
-        type: v4
-        name: decision
-        download: False
-        path: ./xq_eval/datasets_v4/V15_all_new.json
-        limit: 2
-        bs: 1
-        seq_len: 2048
-        seed: *seed
-        special:
-            sptk_map_path: ./xq_eval/datasets_v4/V15_DEMO.sptk_map.json
+        num_samples: -1
+    # - 
+    #     eval_pos: [ "stat_fake_quant_graph", "stat_fake_quant_subset"]
+    #     type: v4
+    #     name: oms
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/test_v2_6_mixed_refined_0617v6-相对坐标-right-560px.json
+    #     limit: 2
+    #     bs: 1
+    #     seq_len: 2048
+    #     seed: *seed
+    # - 
+    #     eval_pos:  [ "stat_fake_quant_graph", "stat_fake_quant_subset"]
+    #     type: vqa
+    #     name: [mmmu]
+    #     download: False
+    #     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+    #     bs: 1
+    #     limit: 2  # Limit test num for evaluation
+    #     inference_per_block: False
+    # - 
+    #     eval_pos: ["stat_fake_quant_graph", "stat_fake_quant_subset"]
+    #     type: v4
+    #     name: feedback
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/val_memory_v3_002.json
+    #     limit: 2
+    #     bs: 1
+    #     seq_len: 2048
+    #     seed: *seed
+    # - 
+    #     eval_pos: ["stat_fake_quant_graph", "stat_fake_quant_subset"]
+    #     type: v4
+    #     name: decision
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/V15_all_new.json
+    #     limit: 2
+    #     bs: 1
+    #     seq_len: 2048
+    #     seed: *seed
+    #     special:
+    #         sptk_map_path: ./xq_eval/datasets_v4/V15_DEMO.sptk_map.json
 # ignored_layers:
 #     block_ids: [0-28]
 #     layer_names: ["mlp.down_proj"]
@@ -89,12 +90,13 @@ quant:
             symmetric: True
             granularity: per_channel
             group_size: -1
-            calib_algo: mse
-            minmax_fix: True
-        # act:
-        #     bit: 16
-        #     symmetric: True
-        #     granularity: per_tensor
+            calib_algo: minmax
+            minmax_fix: False
+        act:
+            bit: 8
+            symmetric: True
+            granularity: per_tensor
+            quant_attn: False
 # save:
 #     # save_trans: True
 #     save_fake: True

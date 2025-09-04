@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_sm/transformed_model/ 
+    path: /code/llmc_out/w4a8/v4_ostquant_nodown_sft/transformed_model/ 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -66,16 +66,16 @@ eval:
         bs: 1
         seq_len: 2048
         seed: *seed
-    - 
-        eval_pos: [fake_quant]
-        type: v4
-        name: alpaca
-        download: False
-        path: ./xq_eval/datasets_v4/alpaca_zh_data_100_test.json
-        limit: -1
-        bs: 1
-        seq_len: 2048
-        seed: *seed
+    # - 
+    #     eval_pos: [fake_quant]
+    #     type: v4
+    #     name: alpaca
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/alpaca_zh_data_100_test.json
+    #     limit: -1
+    #     bs: 1
+    #     seq_len: 2048
+    #     seed: *seed
     # - 
     #     eval_pos: [fake_quant]
     #     type: v4
@@ -109,11 +109,12 @@ quant:
             symmetric: True
             granularity: per_channel
             group_size: -1
-            calib_algo: mse
+            # calib_algo: mse
         act:
             bit: 8
             symmetric: True
             granularity: per_tensor
+            quant_attn: True
 # save:
 #     # save_trans: True
 #     save_fake: False

@@ -1,10 +1,10 @@
 base:
     seed: &seed 0
 model:
-    type: Qwen25VL_V4
-    path: /workspace/gaoy25@xiaopeng.com/v4_datas/v4_ckpts/v12-20250731-232339/checkpoint-17540/
+    type: Qwen25VL
+    path: /dataset/workspace/zhangl98/models/Qwen2.5-VL-7B-Instruct
     tokenizer_mode: slow
-    torch_dtype: torch.bfloat16
+    torch_dtype: torch.float32
 eval:
     - 
         eval_pos: [transformed, fake_quant]
@@ -25,7 +25,7 @@ eval:
     #     limit: 200  # Limit test num for evaluation
     #     inference_per_block: False
 quant:
-    method: OSTQuant
+    method: SpinQuant
     weight:
         bit: 4
         symmetric: True
@@ -33,13 +33,14 @@ quant:
         group_size: -1
         calib_algo: 
         ste: True
-        minmax_fix: True
+        minmax_fix: False
     act:
         bit: 8
         symmetric: True
         granularity: per_tensor
         qmax_to_tensor: True
         ste: True
+        quant_attn: True
     special:
         rotate_mode: hadamard
         fp32_had: True
@@ -49,24 +50,40 @@ quant:
 #     layer_names: ["mlp.down_proj"]
 train:
     data:
-        name: wikitext2
-        download: False
-        path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
-        n_samples: 1200
-        bs: 1
-        seq_len: 2048
-        preproc: wikitext2_gptq
-        seed: *seed
-        cache_dir: 
+        -
+            name: wikitext2
+            download: False
+            path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+            n_samples: 1200
+            bs: 1
+            seq_len: 2048
+            preproc: wikitext2_gptq
+            seed: *seed
+            cache_dir: 
+        # - 
+        #     name: custom_msg
+        #     download: False
+        #     path: ./xq_eval/results/combined_data.json
+        #     n_samples: -1
+        #     bs: 1
+        #     seq_len: 2048
+        #     seed: *seed
+        #     padding: True
+        #     apply_chat_template: True
+        #     cache_dir: 
     train_args:
+        dataloader_drop_last: True
+        accelerator_config:
+            dispatch_batches: True
         special:
-            loss_type: kl_top # kl_top origin
+            loss_type: origin # kl_top origin
             opt_type: RAdam
             rotate_lr: 0.1361639079805877
             rotate_momentum: 0.0
             smooth_lr: 0.009812197369305694
             smooth_momentum: 0.9
             # teacher_path: 
+        # num_train_epochs: 1
         max_steps: 150
         save_strategy: 'no'
         seed: *seed
@@ -75,6 +92,7 @@ train:
         bf16: False
         log_on_each_node: False
         per_device_train_batch_size: 4
+        gradient_accumulation_steps: 1
         logging_steps: 1
         learning_rate: 1.
         weight_decay: 0.
@@ -85,8 +103,8 @@ train:
         logging_first_step: True
         report_to: 
         fsdp: "full_shard auto_wrap"
-        # fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer"
-        fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer,TeacherModel"
+        fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer"
+        # fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer,TeacherModel"
         ddp_find_unused_parameters: True
         fsdp_config:
             # activation_checkpointing: True
@@ -94,9 +112,9 @@ train:
         # eval_strategy: "steps"
         # load_best_model_at_end: True
         # save_total_limit: 1
-# save:
-#     # Save the Spinquant-transformed model.
-#     save_rotate_weight: True
-#     save_trans: True
-#     # save_fake: True
-#     save_path: /dataset/workspace/zhangl98/v4-0807/w4a32/spinquant-minmaxV2
+save:
+    # Save the Spinquant-transformed model.
+    # save_rotate_weight: True
+    save_trans: True
+    # save_fake: True
+    save_path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp1_sp

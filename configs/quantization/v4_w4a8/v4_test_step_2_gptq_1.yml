@@ -3,7 +3,7 @@ base:
 model:
     type: Qwen25VL_V4
     # Load spinquant-transformed model
-    path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp1_sp/transformed_model 
+    path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp3/transformed_model 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -31,9 +31,9 @@ eval:
 #     bs: 1
 #     limit: 200  # Limit test num for evaluation
 #     inference_per_block: False
-# ignored_layers:
-#     block_ids: [0-28]
-#     layer_names: ["mlp.down_proj"]
+ignored_layers:
+    block_ids: [0-28]
+    layer_names: ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj', 'self_attn.o_proj', 'mlp.gate_proj', 'mlp.up_proj']
 quant:
     method: GPTQ
     weight:
@@ -43,10 +43,10 @@ quant:
         group_size: -1
         calib_algo: mse
     act:
-        bit: 8
+        bit: 16
         symmetric: True
         granularity: per_tensor
-        quant_attn: True
+        quant_attn: False
         # static: True
         # calib_algo: static_minmax
     special:
@@ -63,4 +63,4 @@ save:
     # save_trans: True
     save_fake: True
     # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
-    save_path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp1_sp_gptq 
+    save_path: /dataset/workspace/zhangl98/ost_qwen/w4a8/exp3_gptq_1 
