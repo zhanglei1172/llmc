@@ -19,7 +19,7 @@ from ..blockwise_optimization import BlockwiseOpt
 from .attn_utils import _LLMC_ATTN_MAP_
 from .auto_clip import AutoClipper
 from .rotate_utils import ActRotater, WeightRotater
-from .utils import is_fp8_supported_gpu
+from .utils import is_fp8_supported_gpu, get_wquantizer, get_aquantizer, check_do_quant, check_w_only
 from .constant import *
 
 if is_fp8_supported_gpu():
@@ -90,12 +90,22 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def get_replacement_params(self, mode='fake_quant', w_only=False, name=None, args={}):
         params_dict = {}
         if mode in ['fake_quant', 'fake_quant_wo_kv', 'stat_fake_quant']:
-            params_dict['a_qdq'] = (
-                partial(self.a_qdq, aquantizer=self.aquantizer)
-                if not w_only
-                else None
-            )
-            params_dict['w_qdq'] = partial(self.w_qdq, wquantizer=self.wquantizer)
+            if not self.mix_bits:
+                params_dict["a_qdq"] = (
+                    partial(self.a_qdq, aquantizer=self.aquantizer)
+                    if not self.w_only
+                    else None
+                )
+                params_dict["w_qdq"] = partial(self.w_qdq, wquantizer=self.wquantizer)
+            else:
+                params_dict["mix_bits"] = True
+                params_dict["a_qdq"] = self.a_qdq
+                params_dict["w_qdq"] = self.w_qdq
+                params_dict["mix_bits_map"] = self.mix_bits_map
+                params_dict["quantizer_mix_bits"] = self.quantizer_mix_bits
+                params_dict["wquantizer_default"] = self.wquantizer
+                params_dict["aquantizer_default"] = self.aquantizer
+                params_dict["w_only_default"] = self.w_only
 
         elif mode in _REALQUANT_LINEAR_MAP_.keys():
             params_dict['w_q'] = partial(self.w_q, wquantizer=self.wquantizer)
@@ -162,7 +172,21 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
 
         return params_dict
 
+    def _get_quantizer_cls(self, q_config):
+        quant_type = q_config.get('quant_type', 'int-quant')
+        if quant_type == 'int-quant':
+            if q_config['bit'] == 48:
+                quant_module = Weight48IntegerQuantizer
+            else:
+                quant_module = IntegerQuantizer
+        elif quant_type == 'float-quant':
+            quant_module = FloatQuantizer
+        return quant_module 
+
     def set_quant_config(self):
+        self.mix_bits = False
+        self.mix_bits_map = [{} for _ in range(self.num_blocks)]
+        self.quantizer_mix_bits = []
         if self.model.torch_dtype == torch.float8_e4m3fn:
             self.fp8_block_size = self.model.fp8_block_size
 
@@ -228,6 +252,69 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.quant_attn = False
             self.quant_softmax = False
             self.quant_act_fn = False
+
+
+        if "mix_bits" in self.quant_config:
+            self.mix_bits = True
+            mix_bits_settings = self.quant_config["mix_bits"]
+            logger.info(f"mix_bits_settings number: {len(mix_bits_settings)}")
+            logger.info(
+                f"mix_bits_settings:\n{json.dumps(mix_bits_settings, ensure_ascii=False, indent=4)}"
+            )
+            for i in range(len(mix_bits_settings)):
+                mix_bits_setting = mix_bits_settings[f"setting_{i}"]
+                if mix_bits_setting["do_quant"]:
+                    wQuantizer = self._get_quantizer_cls(mix_bits_setting["weight"])
+                    wquantizer_mix_bits = wQuantizer(**mix_bits_setting["weight"])
+                    if "act" in mix_bits_setting:
+                        w_only_mix_bits = False
+                        aQuantizer = self._get_quantizer_cls(mix_bits_setting["act"])
+                        aquantizer_mix_bits = aQuantizer(**mix_bits_setting["act"])
+                    else:
+                        w_only_mix_bits = True
+                    self.quantizer_mix_bits.append(
+                        {
+                            "layer_name": mix_bits_setting["layer_name"],
+                            "do_quant": mix_bits_setting["do_quant"],
+                            "w_only_mix_bits": w_only_mix_bits,
+                            "wquantizer": wquantizer_mix_bits,
+                            "aquantizer": aquantizer_mix_bits
+                            if not w_only_mix_bits
+                            else None,
+                        }
+                    )
+                else:
+                    self.quantizer_mix_bits.append(
+                        {
+                            "layer_name": mix_bits_setting["layer_name"],
+                            "do_quant": mix_bits_setting["do_quant"],
+                        }
+                    )
+        for i in range(len(self.quantizer_mix_bits)):
+            logger.info(f"quantizer_mix_bits {i} : {self.quantizer_mix_bits[i]}")
+            layer_name = self.quantizer_mix_bits[i]["layer_name"]
+            for name in layer_name:
+                n_layeridx = name.split("#")
+                assert (
+                    len(n_layeridx) == 1 or len(n_layeridx) == 2
+                ), "layer_name in mix_bits must be name#1-3-4 or name."
+                if len(n_layeridx) == 2:
+                    n = n_layeridx[0]
+                    layeridx = n_layeridx[1].split("-")
+                    layeridx = [int(idx) for idx in layeridx]
+                else:
+                    n = n_layeridx[0]
+                    layeridx = "all"
+                if layeridx == "all":
+                    for k in range(self.num_blocks):
+                        self.mix_bits_map[k][n] = i
+                else:
+                    for k in layeridx:
+                        self.mix_bits_map[k][n] = i
+
+        logger.info(
+            f"self.mix_bits_map:\n{json.dumps(self.mix_bits_map, ensure_ascii=False, indent=4)}"
+        )
 
         # set kv cache quant config
         if 'kvcache' in self.quant_config:

@@ -83,8 +83,9 @@ class OSTQuant(SpinQuant):
 
     def block_transform(self, block):
         logger.info(f'Start transform the {self.block_idx+1}-th block')
-
+        block.S_up_down = nn.ModuleList()
         subsets = self.model.get_subsets_in_block(block)
+        self._s_up_down_cnt = 0
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
         
@@ -151,16 +152,21 @@ class OSTQuant(SpinQuant):
 
             else:
                 S_norm_upgate = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
-                S_up_down = SmoothModule(torch.ones(layers_dict['mlp.up_proj'].weight.shape[0],dtype=torch.float32,device=self.dev))
+                
                 block.S_norm_upgate = S_norm_upgate
-                block.S_up_down = S_up_down
-                # for n in layers_dict.keys():
-                n = 'mlp.up_proj'
-                m = layers_dict[n]
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_upgate, Sout=block.S_up_down, inverse_out=False)
-                n = 'mlp.gate_proj'
-                m = layers_dict[n]
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_upgate, inverse_out=False)
+                for n in layers_dict.keys():
+                # n = 'mlp.up_proj'
+                    m = layers_dict[n]
+                    if not n.endswith("up_proj"):
+                        self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_upgate, inverse_out=False)
+                    else:
+                        S_up_down = SmoothModule(torch.ones(m.weight.shape[0],dtype=torch.float32,device=self.dev))
+                        self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False, Sin=block.S_norm_upgate, Sout=S_up_down, inverse_out=False)
+                        block.S_up_down.append(S_up_down)
+                        if self.selected_layers and "S_up_down" not in self.selected_layers:
+                            S_up_down.weight.requires_grad = False
+                            
+                
 
                 args = {'Sout': S_norm_upgate}
                 params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
@@ -175,23 +181,25 @@ class OSTQuant(SpinQuant):
                 if self.selected_layers:
                     if "S_norm_upgate" not in self.selected_layers:
                         block.S_norm_upgate.weight.requires_grad = False
-                    if "S_up_down" not in self.selected_layers:
-                        block.S_up_down.weight.requires_grad = False
+                    # if "S_up_down" not in self.selected_layers:
+                    #     block.S_up_down.weight.requires_grad = False
 
         else:
             if self.config['model']['type'] in ['Opt']:
                 self.bake_mean_into_linear(layers[0])
-
-            n = list(layers_dict.keys())[0]
-            m = layers[0]
-            if 'is_mlp' in subset and subset['is_mlp']:
-                if self.online_rotate:
-                    apply_exact_had_to_linear(m, had_dim=-1, output=False)
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=True, Sin=block.S_up_down, inverse_out=False)
-                
-            else:
-                self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=True,Sin=block.S_ov)
-                # self.replace_rotate_sm_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
+            
+            for i, n in enumerate(layers_dict.keys()):
+                m = layers_dict[n]
+                if 'is_mlp' in subset and subset['is_mlp']:
+                    # up_m = prev_op[i]
+                    if self.online_rotate:
+                        apply_exact_had_to_linear(m, had_dim=-1, output=False)
+                    self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=True, Sin=block.S_up_down[self._s_up_down_cnt], inverse_out=False)
+                    self._s_up_down_cnt += 1
+                    
+                else:
+                    self.replace_rotate_sm_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=True,Sin=block.S_ov)
+                    # self.replace_rotate_sm_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
     
     def replace_rotate_sm_fc(self, block, n, m, Q1=None, Q2=None, transpose=False, Sin=None, Sout=None, inverse_out=False, is_qk=False):
         args = {}

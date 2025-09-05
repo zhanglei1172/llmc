@@ -7,6 +7,12 @@ from loguru import logger
 
 from .module_utils import _LLMC_LINEAR_TYPES_, _TRANSFORMERS_LINEAR_TYPES_
 from .utils import is_fp8_supported_gpu
+from llmc.compression.quantization.utils import (
+    check_do_quant,
+    get_wquantizer,
+    get_aquantizer,
+    check_w_only,
+)
 
 if is_fp8_supported_gpu():
     from .kernel import weight_cast_to_bf16, weight_cast_to_fp8
@@ -29,6 +35,8 @@ class AutoClipper:
         clip_sym,
         save_clip,
         padding_mask,
+        mix_bits_map,
+        quantizer_mix_bits,
     ):
         self.wquantizer = wquantizer
         self.aquantizer = aquantizer
@@ -38,11 +46,19 @@ class AutoClipper:
         self.padding_mask = padding_mask
         self.weight_clips = {}
         self.w_only = w_only
+        self.mix_bits_map = mix_bits_map
+        self.quantizer_mix_bits = quantizer_mix_bits
         self.logit = lambda x: torch.log(x / (1 - x))
 
     @torch.no_grad()
     def run(self, block, block_idx, input_feat, n_sample_token):
         for n, m in block.named_modules():
+            if not check_do_quant(
+                            block_idx, n, self.mix_bits_map, self.quantizer_mix_bits
+                        ):
+                            logger.info(
+                                f"This layer {n} in {block_idx}-th block is set to float. No need to clip this layer."
+                            )
             if isinstance(m, tuple(_LLMC_LINEAR_TYPES_ + _TRANSFORMERS_LINEAR_TYPES_)):
                 if m.weight.data.dtype == torch.float8_e4m3fn:
                     is_fp8_weight = True
@@ -92,18 +108,24 @@ class AutoClipper:
         n_sample_token=512,
         eps=0.0,
     ):
-
+        wquantizer = get_wquantizer(
+                    block_idx,
+                    layer_name,
+                    self.mix_bits_map,
+                    self.quantizer_mix_bits,
+                    self.wquantizer,
+                )
         assert w.dim() == 2
 
-        if self.wquantizer.granularity == 'per_group':
-            group_size = self.wquantizer.group_size
+        if wquantizer.granularity == 'per_group':
+            group_size = wquantizer.group_size
         else:
             group_size = w.shape[1]
 
         try:
             w = w.reshape(w.shape[0], 1, -1, group_size)
         except RuntimeError:
-            w = self.wquantizer.reshape_tensor(w)
+            w = wquantizer.reshape_tensor(w)
             w = w.reshape(w.shape[0], 1, -1, group_size)
         oc_batch_size = 256 if w.shape[0] % 256 == 0 else 64  # prevent OOM
         assert w.shape[0] % oc_batch_size == 0
@@ -126,7 +148,13 @@ class AutoClipper:
             org_out_dict = {}
             for i_s in range(int(max_shrink * n_grid)):
                 if i_s == 0:
-                    if self.clip_version == 'v2' and not self.w_only:
+                    if self.clip_version == 'v2' and not check_w_only(
+                        block_idx,
+                        layer_name,
+                        self.mix_bits_map,
+                        self.quantizer_mix_bits,
+                        self.w_only,
+                    ):
                         i_s += eps
                 err_mean = 0
                 for i in range(len(inputs)):
@@ -139,7 +167,7 @@ class AutoClipper:
                     try:
                         x = x.reshape(1, x.shape[0], -1, group_size)
                     except RuntimeError:
-                        x = self.wquantizer.reshape_tensor(x)
+                        x = wquantizer.reshape_tensor(x)
                         x = x.reshape(1, x.shape[0], -1, group_size)
                     if n_sample_token is None:
                         n_sample_token = min(x.shape[1], 512)
@@ -159,7 +187,8 @@ class AutoClipper:
                         min_val = org_min_val * (1 - i_s / n_grid)
 
                     q_w = self.fake_quantize_weight(
-                        w, min_val, max_val, org_min_val, org_max_val
+                        block_idx,
+                        w, min_val, max_val, org_min_val, org_max_val, layer_name
                     )
                     q_x = self.fake_quantize_input(block_idx, x, layer_name)
 
@@ -192,13 +221,20 @@ class AutoClipper:
 
     @torch.no_grad()
     def apply_clip(self, block_idx, layer, min_val, max_val, layer_name):
+        wquantizer = get_wquantizer(
+                    block_idx,
+                    layer_name,
+                    self.mix_bits_map,
+                    self.quantizer_mix_bits,
+                    self.wquantizer,
+                )
         if self.clip_version == 'v1':
             max_val = max_val.to(layer.weight.device)
             org_shape = layer.weight.shape
             try:
                 layer.weight.data = layer.weight.data.reshape(*max_val.shape[:2], -1)
             except RuntimeError:
-                layer.weight.data = self.wquantizer.reshape_tensor(layer.weight.data)
+                layer.weight.data = wquantizer.reshape_tensor(layer.weight.data)
                 layer.weight.data = layer.weight.data.reshape(*max_val.shape[:2], -1)
             if self.clip_sym:
                 min_val = -max_val
@@ -207,7 +243,7 @@ class AutoClipper:
             try:
                 layer.weight.data = layer.weight.data.reshape(org_shape)
             except RuntimeError:
-                layer.weight.data = self.wquantizer.restore_tensor(
+                layer.weight.data = wquantizer.restore_tensor(
                     layer.weight.data, org_shape
                 )
         elif self.clip_version == 'v2':
@@ -231,8 +267,15 @@ class AutoClipper:
             raise Exception('Not support other clip version')
 
     def get_clip_factor(self, block_idx, layer, min_val, max_val, layer_name):
-        org_min_val, org_max_val = self.wquantizer.get_minmax_range(
-            self.wquantizer.reshape_tensor(layer.weight.data)
+        wquantizer = get_wquantizer(
+                    block_idx,
+                    layer_name,
+                    self.mix_bits_map,
+                    self.quantizer_mix_bits,
+                    self.wquantizer,
+                )
+        org_min_val, org_max_val = wquantizer.get_minmax_range(
+            wquantizer.reshape_tensor(layer.weight.data)
         )
         org_val_shape = org_max_val.shape
 
@@ -255,27 +298,47 @@ class AutoClipper:
 
         return up_factor, low_factor
 
-    def fake_quantize_weight(self, w, min_val, max_val, org_min_val, org_max_val):
+    def fake_quantize_weight(self, block_idx, w, min_val, max_val, org_min_val, org_max_val, layer_name):
+        wquantizer = get_wquantizer(
+                    block_idx,
+                    layer_name,
+                    self.mix_bits_map,
+                    self.quantizer_mix_bits,
+                    self.wquantizer,
+                )
         if self.clip_version == 'v1':
             cur_w = torch.clamp(w, min_val, max_val)
-            q_w = self.wquantizer.fake_quant_weight_dynamic(cur_w)
+            q_w = wquantizer.fake_quant_weight_dynamic(cur_w)
         elif self.clip_version == 'v2':
             low_factor = self.logit((min_val / org_min_val))
             up_factor = self.logit((max_val / org_max_val))
-            tensor_range = self.wquantizer.get_learnable_range(w, low_factor, up_factor)
+            tensor_range = wquantizer.get_learnable_range(w, low_factor, up_factor)
 
-            scales, zeros, qmax, qmin = self.wquantizer.get_qparams(
+            scales, zeros, qmax, qmin = wquantizer.get_qparams(
                 tensor_range, w.device
             )
             args = {'scales': scales, 'zeros': zeros, 'qmax': qmax, 'qmin': qmin}
-            q_w = self.wquantizer.fake_quant_weight_static(w, args)
+            q_w = wquantizer.fake_quant_weight_static(w, args)
         else:
             raise Exception('Not support other clip version')
         return q_w
 
     def fake_quantize_input(self, block_idx, x, layer_name):
-        if not self.w_only:
-            q_x = self.aquantizer.fake_quant_act_dynamic(x)
+        if not check_w_only(
+                        block_idx,
+                        layer_name,
+                        self.mix_bits_map,
+                        self.quantizer_mix_bits,
+                        self.w_only,
+                    ):
+            aquantizer = get_aquantizer(
+                            block_idx,
+                            layer_name,
+                            self.mix_bits_map,
+                            self.quantizer_mix_bits,
+                            self.aquantizer,
+                        )
+            q_x = aquantizer.fake_quant_act_dynamic(x)
         else:
             q_x = x
         return q_x

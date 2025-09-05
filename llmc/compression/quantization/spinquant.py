@@ -488,12 +488,22 @@ class SpinQuant(BaseBlockwiseQuantization):
             logger.info(self.model.model)
 
             params_dict = {}
-            params_dict['w_qdq'] = partial(self.w_qdq_tmp, wquantizer=self.wquantizer)
-            params_dict['a_qdq'] = (
-                partial(self.a_qdq, aquantizer=self.aquantizer)
-                if not self.w_only
-                else None
-            )
+            if not self.mix_bits:
+                params_dict["a_qdq"] = (
+                    partial(self.a_qdq, aquantizer=self.aquantizer)
+                    if not self.w_only
+                    else None
+                )
+                params_dict["w_qdq"] = partial(self.w_qdq_tmp, wquantizer=self.wquantizer)
+            else:
+                params_dict["mix_bits"] = True
+                params_dict["a_qdq"] = self.a_qdq
+                params_dict["w_qdq"] = self.w_qdq_tmp
+                params_dict["mix_bits_map"] = self.mix_bits_map
+                params_dict["quantizer_mix_bits"] = self.quantizer_mix_bits
+                params_dict["wquantizer_default"] = self.wquantizer
+                params_dict["aquantizer_default"] = self.aquantizer
+                params_dict["w_only_default"] = self.w_only
             if self.modality == 'vision':
                 self.model.replace_vision_module_all(
                     RotateFakeQuantLinear, params_dict
@@ -548,7 +558,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             add_eos_token=False,
             add_bos_token=False,
         )
-        llmc_model_to_train.processor.tokenizer = train_tokenizer
+        if llmc_model_to_train.processor:
+            llmc_model_to_train.processor.tokenizer = train_tokenizer
 
 
         # if 'eval' in config and len(config.eval.eval_pos):

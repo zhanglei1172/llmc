@@ -1077,7 +1077,7 @@ class FakeQuantLinear(nn.Module):
 
     @classmethod
     @torch.no_grad()
-    def new(cls, module, w_qdq, a_qdq):
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
         weight = module.weight.data
         if hasattr(module, 'bias') and module.bias is not None:
             bias = module.bias.data
@@ -1092,6 +1092,7 @@ class FakeQuantLinear(nn.Module):
         new_module.a_qdq_name = (
             cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
         )
+        new_module.debug_print = debug_print
         return new_module
 
     @classmethod
@@ -1107,6 +1108,7 @@ class FakeQuantLinear(nn.Module):
             f'weight_quant={self.w_qdq_name},'
             f'act_quant={self.a_qdq_name},'
             f'online_rotate={self.buf_rotate})'
+            f"debug_print={self.debug_print})"
         )
 
 class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
@@ -1182,7 +1184,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
 
     @classmethod
     @torch.no_grad()
-    def new(cls, module, w_qdq, a_qdq):
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
         if not isinstance(module, RotateLinear2):
             return module
         weight = module.weight.data
@@ -1199,6 +1201,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
         new_module.a_qdq_name = (
             cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
         )
+        new_module.debug_print = debug_print
         return new_module
 
 
@@ -1210,6 +1213,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
             f"act_quant={self.a_qdq_name}, "
             f"w_rotate={self.buf_w_rotate}, "
             f"a_rotate={self.buf_a_rotate},"
+            f"debug_print={self.debug_print})"
         )
 
 class RotateFakeQuantConv3d(RotateFakeQuantLinear):
@@ -1267,7 +1271,7 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
     
     @classmethod
     @torch.no_grad()
-    def new(cls, module, w_qdq, a_qdq):
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
         if not isinstance(module, RotateFakeQuantConv3d):
             return module
         weight = module.weight.data
@@ -1281,6 +1285,7 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
         new_module.a_qdq_name = (
             cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
         )
+        new_module.debug_print = debug_print
         return new_module
 
     def __repr__(self):
@@ -1291,6 +1296,7 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
             f"act_quant={self.a_qdq_name}, "
             f"w_rotate={self.buf_w_rotate}, "
             f"a_rotate={self.buf_a_rotate})"
+            f"debug_print={self.debug_print})"
         )
     
     
