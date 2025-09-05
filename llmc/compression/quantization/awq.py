@@ -8,7 +8,7 @@ import torch.nn as nn
 from loguru import logger
 
 from llmc.utils.registry_factory import ALGO_REGISTRY
-
+from .utils import get_wquantizer, get_aquantizer, check_do_quant, check_w_only
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .utils import is_fp8_supported_gpu
 
@@ -58,7 +58,15 @@ class Awq(BaseBlockwiseQuantization):
             else:
                 weight = _m.weight.data.clone()
             org_shape = weight.shape
-            reshaped = self.wquantizer.reshape_tensor(weight)
+            # reshaped = self.wquantizer.reshape_tensor(weight)
+            wquantizer = get_wquantizer(
+                        self.block_idx,
+                        list(layers_dict.keys())[0],
+                        self.mix_bits_map,
+                        self.quantizer_mix_bits,
+                        self.wquantizer,
+                    )
+            reshaped = wquantizer.reshape_tensor(weight)
             abs_weights = reshaped.abs()
             max_vals = abs_weights.amax(dim=1, keepdim=True)
             layer_scale = abs_weights.div_(max_vals)
@@ -154,7 +162,14 @@ class Awq(BaseBlockwiseQuantization):
             tmp_weight_data = fc.weight.data
 
         tmp_weight_data = self.scaling_weight(tmp_weight_data, scales, is_gqa)
-        tmp_weight_data = self.wquantizer.fake_quant_weight_dynamic(tmp_weight_data)
+        # tmp_weight_data = self.wquantizer.fake_quant_weight_dynamic(tmp_weight_data)
+        tmp_weight_data = get_wquantizer(
+            self.block_idx,
+            layer_name,
+            self.mix_bits_map,
+            self.quantizer_mix_bits,
+            self.wquantizer,
+        ).fake_quant_weight_dynamic(tmp_weight_data)
 
         if fc.weight.data.dtype == torch.float8_e4m3fn:
             fc.weight.data, fc.weight_scale_inv.data \
@@ -166,12 +181,40 @@ class Awq(BaseBlockwiseQuantization):
 
     def fake_quantize_input(self, x_tmp, layers_dict):
         if self._bs == x_tmp.shape[0]:
-            x_tmp = self.aquantizer.fake_quant_act_dynamic(x_tmp)
+            # x_tmp = self.aquantizer.fake_quant_act_dynamic(x_tmp)
+            if not check_w_only(
+                self.block_idx,
+                list(layers_dict.keys())[0],
+                self.mix_bits_map,
+                self.quantizer_mix_bits,
+                self.w_only,
+            ):
+                x_tmp = get_aquantizer(
+                    self.block_idx,
+                    list(layers_dict.keys())[0],
+                    self.mix_bits_map,
+                    self.quantizer_mix_bits,
+                    self.aquantizer,
+                ).fake_quant_act_dynamic(x_tmp)
         else:
             outs = []
             for i in range(x_tmp.shape[0]):
                 _x = x_tmp[i]
-                _x = self.aquantizer.fake_quant_act_dynamic(_x)
+                # _x = self.aquantizer.fake_quant_act_dynamic(_x)
+                if not check_w_only(
+                    self.block_idx,
+                    list(layers_dict.keys())[0],
+                    self.mix_bits_map,
+                    self.quantizer_mix_bits,
+                    self.w_only,
+                ):
+                    _x = get_aquantizer(
+                        self.block_idx,
+                        list(layers_dict.keys())[0],
+                        self.mix_bits_map,
+                        self.quantizer_mix_bits,
+                        self.aquantizer,
+                    ).fake_quant_act_dynamic(_x)
                 outs.append(_x)
             x_tmp = torch.stack(outs)
         return x_tmp
