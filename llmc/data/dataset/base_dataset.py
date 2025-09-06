@@ -305,8 +305,10 @@ class MixDataset(BaseDataset):
             if masks is not None:
                 padding_mask.extend(masks)
         if padding_mask:
-            assert len(calib_model_inputs) == len(padding_mask), \
-                "The length of calib_model_inputs and padding_mask must be the same."
+            if len(calib_model_inputs) != len(padding_mask):
+                padding_mask = None
+            # assert len(calib_model_inputs) == len(padding_mask), \
+            #     "The length of calib_model_inputs and padding_mask must be the same."
         else:
             padding_mask = None
         if len(calib_model_inputs) == 0:

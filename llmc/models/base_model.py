@@ -471,7 +471,7 @@ class BaseModel(metaclass=ABCMeta):
 
             
 
-            if is_quant_param and not check_do_quant(
+            if is_quant_param and params_dict.get("mix_bits", False) and not check_do_quant(
                             block_idx,
                             name,
                             params_dict["mix_bits_map"],

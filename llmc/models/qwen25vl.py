@@ -9,6 +9,7 @@ from transformers import AutoConfig, AutoProcessor, AutoTokenizer
 
 try:
     from transformers import Qwen2_5_VLForConditionalGeneration
+    from transformers.models.qwen2_5_vl import modeling_qwen2_5_vl
 except Exception:
     logger.warning(
         'Can not import Qwen2_5_VLForConditionalGeneration. '
@@ -33,9 +34,10 @@ from .qwen25 import Qwen25
 class Qwen25VL(Qwen25):
     def __init__(self, config, device_map=None, use_cache=False):
         super().__init__(config, device_map, use_cache)
-        blocks = self.get_blocks()
-        for block in blocks:
-            block.self_attn.forward = torch.compile(block.self_attn.forward)
+        modeling_qwen2_5_vl.Qwen2_5_VLAttention.forward = torch.compile()(modeling_qwen2_5_vl.Qwen2_5_VLAttention.forward)
+        # blocks = self.get_blocks()
+        # for block in blocks:
+        #     block.self_attn.forward = torch.compile(block.self_attn.forward)
 
     def build_model(self):
         self.eval_name = 'Qwen25VLEval'
