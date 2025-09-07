@@ -126,7 +126,7 @@ class Qwen25VL(Qwen25):
                         }
                     ]
                 messages.append(message)
-                answers.append(img_qas[idx]['answer'] + '<|im_end|>')
+                answers.append(img_qas[idx]['answer'] if img_qas[idx]['answer'].endswith('<|im_end|>') else img_qas[idx]['answer'] + '<|im_end|>')
 
 
             texts = [

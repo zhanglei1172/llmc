@@ -133,7 +133,7 @@ def main(config):
             eval_ress.update(eval_res)
         if int(os.environ['RANK']) == 0:
             # import nni
-            nni.report_final_result(eval_ress['fake_quant']['wikitext2'])
+            nni.report_final_result(eval_ress['fake_quant'].get('wikitext2', 0))
         eval_res = eval_model(model, blockwise_opts, eval_list, eval_pos='fake_quant_wo_kv')
         if eval_res is not None:
             eval_ress.update(eval_res)

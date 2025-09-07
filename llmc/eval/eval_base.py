@@ -103,7 +103,8 @@ class BaseEval:
                         self.model.batch_process(
                             testdata,
                             calib_or_eval='eval',
-                            apply_chat_template=self.apply_chat_template
+                            apply_chat_template=self.apply_chat_template,
+                            calib_cfg=self.eval_cfg,
                         )
                     )
                 elif self.eval_dataset_bs == 1:
@@ -111,7 +112,8 @@ class BaseEval:
                         self.model.batch_process(
                             [sample],
                             calib_or_eval='eval',
-                            apply_chat_template=self.apply_chat_template
+                            apply_chat_template=self.apply_chat_template,
+                            calib_cfg=self.eval_cfg,
                         )
                         for sample in testdata
                     ]  # noqa
@@ -124,7 +126,8 @@ class BaseEval:
                             self.model.batch_process(
                                 batch,
                                 calib_or_eval='eval',
-                                apply_chat_template=self.apply_chat_template
+                                apply_chat_template=self.apply_chat_template,
+                                calib_cfg=self.eval_cfg,
                             )
                         )
             elif self.eval_dataset_name in ['t2v', 'i2v']:
@@ -132,9 +135,14 @@ class BaseEval:
         return testenc
 
     def get_cutomdata(self, custom_dataset):
-        audio_img_qa_json = os.path.join(custom_dataset, 'samples.json')
+        if os.path.isdir(custom_dataset):
+            audio_img_qa_json = os.path.join(custom_dataset, 'samples.json')
+        else:
+            audio_img_qa_json = custom_dataset
         fp = open(audio_img_qa_json)
         custom_data_samples = json.load(fp)
+        if isinstance(custom_data_samples[0], list):
+            return custom_data_samples
         for idx in range(len(custom_data_samples)):
             if 'audio' in custom_data_samples[idx]:
                 if isinstance(custom_data_samples[idx]['audio'], list):
