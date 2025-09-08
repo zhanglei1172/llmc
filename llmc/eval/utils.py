@@ -10,6 +10,7 @@ from llmc.eval import (
     DecodePerplexityEval,
     HumanEval,
     PerplexityEval,
+    DebugEval,
     TokenConsistencyEval,
     KLDivergenceEval,
     VideoGenerateEval,
@@ -79,6 +80,8 @@ def get_eval_list(model, config):
                             eval_class = MSEEval(model, config_for_eval)
                         elif config_tmp.eval.type == "ppl":
                             eval_class = PerplexityEval(model, config_for_eval)
+                        elif config_tmp.eval.type == "debug":
+                            eval_class = DebugEval(model, config_for_eval)
                         elif config_tmp.eval.type == "decode_ppl":
                             eval_class = DecodePerplexityEval(model, config_for_eval)
                         elif config_tmp.eval.type == "video_gen":
