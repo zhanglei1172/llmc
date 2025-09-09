@@ -26,6 +26,7 @@ except Exception:
 
 from llmc.utils.registry_factory import MODEL_REGISTRY
 from llmc.utils import resize_image
+from llmc.compression.quantization.constant import ATTN_IMPL
 
 from .qwen25 import Qwen25
 
@@ -56,7 +57,7 @@ class Qwen25VL(Qwen25):
             trust_remote_code=True,
             torch_dtype=self.torch_dtype,
             low_cpu_mem_usage=True,
-            attn_implementation="eager",
+            attn_implementation=ATTN_IMPL,
         )
         self.mm_model = self.vlm_model
         logger.info(f'self.vlm_model : {self.vlm_model}')

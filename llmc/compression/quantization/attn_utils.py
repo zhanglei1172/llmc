@@ -468,12 +468,14 @@ class LlmcQwen2_5_VLAttention(nn.Module):
 
         self.rotary_emb = ori_module.rotary_emb
         self.matmul_1 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
-        # self.matmul_2 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
-        self.matmul_2 = LlmcMatmul(None, matmul_a2_qdq)
+        self.matmul_2 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
+        # self.matmul_2 = LlmcMatmul(None, matmul_a2_qdq)
+        # self.matmul_2 = LlmcMatmul(None, None)
         # self.qdq1 = LlmcQDQ(a_qdq=matmul_a1_qdq)
         # self.qdq2 = LlmcQDQ(a_qdq=matmul_a2_qdq)
         # self.qdq3 = LlmcQDQ(a_qdq=matmul_a2_qdq)
-        self.softmax = LlmcSoftmax(softmax_a_qdq)
+        # self.softmax = LlmcSoftmax(softmax_a_qdq)
+        self.softmax = LlmcSoftmax(None)
         
 
     def forward(

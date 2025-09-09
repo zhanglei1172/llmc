@@ -5,7 +5,7 @@ import packaging
 from llmc.utils.registry_factory import MODEL_REGISTRY
 
 from .base_model import BaseModel
-
+from llmc.compression.quantization.constant import ATTN_IMPL
 
 @MODEL_REGISTRY
 class Qwen3OmniMoeThinker(BaseModel):
@@ -33,7 +33,7 @@ class Qwen3OmniMoeThinker(BaseModel):
             trust_remote_code=True,
             torch_dtype=self.torch_dtype,
             low_cpu_mem_usage=True,
-            attn_implementation="eager",
+            attn_implementation=ATTN_IMPL,
         )
         self.mm_model = self.vlm_model
         logger.info(f'self.vlm_model : {self.vlm_model}')
