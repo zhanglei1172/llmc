@@ -544,6 +544,8 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             input_data = self.input['data']
 
         for i in range(len(input_data)):
+            self.cnt = i
+            ori_dev = input_data[i].device
             input_data[i] = input_data[i].to(device=next(block.parameters()).device)
             for k in self.input['kwargs'][i]:
                 if torch.is_tensor(self.input['kwargs'][i][k]):
@@ -560,6 +562,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 if isinstance(out, tuple):
                     out = out[0]
                 output.append(out)
+            input_data[i] = input_data[i].to(ori_dev)
         return output
 
     def block_opt(self, block):
