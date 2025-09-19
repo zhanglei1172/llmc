@@ -6,7 +6,7 @@ model:
     tokenizer_mode: slow
     torch_dtype: torch.float32
 eval:
-    eval_pos: [transformed, fake_quant]
+    eval_pos: [pretrain, transformed, fake_quant]
     name: wikitext2
     download: False
     path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
@@ -39,53 +39,15 @@ ignored_layers:
     layer_names: ["mlp.down_proj"]
 train:
     data:
-        - 
-            name: wikitext2
-            download: False
-            path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
-            n_samples: 400
-            bs: 1
-            seq_len: 2048
-            preproc: wikitext2_gptq
-            seed: *seed
-            cache_dir: 
-        # -
-        #     name: V4_mmmu
-        #     download: False
-        #     path: ./xq_eval/datasets_v4/mmmu_val_489_calib_368length.json
-        #     n_samples: 200
-        #     bs: 1
-        #     seq_len: 2048
-        #     preproc: v4_general_preproc
-        #     seed: *seed
-        #     cache_dir: 
-        # - 
-        #     name: V4_feedback
-        #     download: False
-        #     path: ./xq_eval/datasets_v4/train_memory_v3_002.json
-        #     n_samples: 200
-        #     bs: 1
-        #     seq_len: 2048
-        #     preproc: v4_general_preproc
-        #     seed: *seed
-        # - 
-        #     name: V4_oms
-        #     download: False
-        #     path: ./xq_eval/datasets_v4/test_v2_6_0728v8-相对坐标-right-560px.json
-        #     n_samples: 200
-        #     bs: 1
-        #     seq_len: 2048
-        #     preproc: v4_general_preproc
-        #     seed: *seed
-        # - 
-        #     name: V4_alpaca
-        #     download: False
-        #     path: ./xq_eval/datasets_v4/alpaca_zh_data_300_calib.json
-        #     n_samples: 200
-        #     bs: 1
-        #     seq_len: 2048
-        #     preproc: v4_general_preproc
-        #     seed: *seed
+        name: wikitext2
+        download: False
+        path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+        n_samples: 800
+        bs: 1
+        seq_len: 2048
+        preproc: wikitext2_gptq
+        seed: *seed
+        cache_dir: 
     train_args:
         seed: *seed
         fp16: False
@@ -98,7 +60,7 @@ train:
         weight_decay: 0.
         lr_scheduler_type: "cosine"
         gradient_checkpointing: True
-        max_steps: 400
+        max_steps: 100
         output_dir: ./out/
         logging_dir: ./log/
         logging_first_step: True
@@ -117,4 +79,4 @@ save:
     save_rotate_weight: True
     save_trans: True
     save_fake: True
-    save_path: /code/llmc_test/work/out_v4_test/v4-0807/w4a8/spinquant_custom_4data
+    save_path: /code/llmc_test/work/out_v4_test/v4-0807/w4a8/spinquant
