@@ -8,8 +8,11 @@ import torch.nn.functional as F
 from loguru import logger
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 
+from llmc.compression.quantization.constant import MEASUREMENT
+
 from .quant import FloatQuantizer
 from .utils import is_fp8_supported_gpu
+from .measure import MeasureRecorder
 
 if is_fp8_supported_gpu():
     from .kernel import act_quant, fp8_gemm, weight_cast_to_bf16
@@ -53,6 +56,14 @@ def get_module_name(model, module):
             return name
     return None
 
+class TeacherModel(nn.Module):
+    def __init__(self, ori_moule):
+        super().__init__()
+        self.ori_moule = ori_moule
+
+    def forward(self, *args, **kwargs):
+        return self.ori_moule(*args, **kwargs)
+    
 class OriginEmbedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, padding_idx,
                  max_norm, norm_type, scale_grad_by_freq,
@@ -456,6 +467,72 @@ class LlmcRMSNorm(nn.Module):
     def __repr__(self):
         return 'LlmcRMSNorm()'
 
+class LlmcScaleRMSNorm(LlmcRMSNorm):
+    def __init__(self, weight, w_rot, eps=1e-6):
+        self.bias = None
+        super().__init__(weight, eps)
+        self.w_rot = w_rot
+        self.register_buffer("buf_w_rotate", torch.tensor(w_rot is not None))
+
+    def forward(self, hidden_states):
+        if self.buf_w_rotate:
+            weight, _ = self._rotate_weight()
+        else:
+            weight = self.weight
+        input_dtype = hidden_states.dtype
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        # return F.rms_norm(hidden_states, self.weight.shape, self.weight, self.variance_epsilon).to(input_dtype)
+        return weight * hidden_states.to(input_dtype)
+
+    def _rotate_weight(self):
+        tmp_weight, bias = self.w_rot(self)
+        return tmp_weight, bias
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_rot, a_rot=None):
+        assert a_rot is None, "a_rot is not supported in LlmcScaleRMSNorm"
+        if hasattr(module, 'eps'):
+            eps = module.eps
+        else:
+            eps = module.variance_epsilon
+        weight = module.weight
+        new_module = cls(weight, w_rot, eps)
+        return new_module
+
+    def __repr__(self):
+        return ('LlmcScaleRMSNorm(), '
+            f"w_rotate={self.buf_w_rotate}) "
+        )
+
+class OriginLlmcRMSNorm(nn.Module):
+    def __init__(self, weight, eps=1e-6):
+        super().__init__()
+        self.variance_epsilon = eps
+        self.weight = nn.Parameter(weight, requires_grad=False)
+
+
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        # return F.rms_norm(hidden_states, self.weight.shape, self.weight, self.variance_epsilon).to(input_dtype)
+        return self.weight * hidden_states.to(input_dtype)
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module):
+        if hasattr(module, 'eps'):
+            eps = module.eps
+        else:
+            eps = module.variance_epsilon
+        weight = module.weight
+        new_module = cls(weight, eps)
+        return new_module
+
+    def __repr__(self):
+        return 'OriginLlmcRMSNorm()'
 
 class LlmcQwen2RMSNorm(LlmcLlamaRMSNorm):
     def __init__(self, weight, eps=1e-6):
@@ -974,8 +1051,8 @@ class FakeQuantLinear(nn.Module):
             x = self.a_qdq(x, self)
 
         if not hasattr(self, 'tmp_weight'):
-            tmp_weight = self.w_qdq(self)
-            self.register_buffer('tmp_weight', tmp_weight, persistent=False)
+            self.tmp_weight = self.w_qdq(self)
+            # self.register_buffer('tmp_weight', tmp_weight, persistent=False)
             self.tmp_bias = self.bias
 
         elif self.dynamic_quant_weight:
@@ -984,6 +1061,11 @@ class FakeQuantLinear(nn.Module):
 
         elif self.dynamic_quant_tmp_weight:
             self.tmp_weight = self.w_qdq(self)
+            # self.tmp_bias = self.bias
+        # else:
+        #     tmp_weight = self.w_qdq(self)
+        #     # self.register_buffer('tmp_weight', tmp_weight, persistent=False)
+        #     tmp_bias = self.bias
 
         if self.fp8_forward:
             y = block_wise_fp8_forward_func(
@@ -995,7 +1077,7 @@ class FakeQuantLinear(nn.Module):
 
     @classmethod
     @torch.no_grad()
-    def new(cls, module, w_qdq, a_qdq):
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
         weight = module.weight.data
         if hasattr(module, 'bias') and module.bias is not None:
             bias = module.bias.data
@@ -1010,6 +1092,7 @@ class FakeQuantLinear(nn.Module):
         new_module.a_qdq_name = (
             cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
         )
+        new_module.debug_print = debug_print
         return new_module
 
     @classmethod
@@ -1025,6 +1108,7 @@ class FakeQuantLinear(nn.Module):
             f'weight_quant={self.w_qdq_name},'
             f'act_quant={self.a_qdq_name},'
             f'online_rotate={self.buf_rotate})'
+            f"debug_print={self.debug_print})"
         )
 
 class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
@@ -1100,7 +1184,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
 
     @classmethod
     @torch.no_grad()
-    def new(cls, module, w_qdq, a_qdq):
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
         if not isinstance(module, RotateLinear2):
             return module
         weight = module.weight.data
@@ -1117,6 +1201,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
         new_module.a_qdq_name = (
             cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
         )
+        new_module.debug_print = debug_print
         return new_module
 
 
@@ -1128,6 +1213,7 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
             f"act_quant={self.a_qdq_name}, "
             f"w_rotate={self.buf_w_rotate}, "
             f"a_rotate={self.buf_a_rotate},"
+            f"debug_print={self.debug_print})"
         )
 
 class RotateFakeQuantConv3d(RotateFakeQuantLinear):
@@ -1185,7 +1271,7 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
     
     @classmethod
     @torch.no_grad()
-    def new(cls, module, w_qdq, a_qdq):
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
         if not isinstance(module, RotateFakeQuantConv3d):
             return module
         weight = module.weight.data
@@ -1199,6 +1285,7 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
         new_module.a_qdq_name = (
             cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
         )
+        new_module.debug_print = debug_print
         return new_module
 
     def __repr__(self):
@@ -1209,6 +1296,7 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
             f"act_quant={self.a_qdq_name}, "
             f"w_rotate={self.buf_w_rotate}, "
             f"a_rotate={self.buf_a_rotate})"
+            f"debug_print={self.debug_print})"
         )
     
     
@@ -1292,6 +1380,137 @@ class EffcientFakeQuantLinear(nn.Module):
             f'debug_print={self.debug_print})'
         )
 
+class StatFakeQuantLinear(nn.Module):
+    def __init__(self, bias, ori_module, w_qdq, a_qdq, measurement=MEASUREMENT):
+        super().__init__()
+        self.recorder_qdq_w = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
+        self.recorder_qdq_a = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
+        self.recorder_qdq_o = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
+        self.recorder_graph = MeasureRecorder(measurement=measurement, flatten_start_dim=-1)
+        self.tmp_qdq = []
+        self.register_parameter('weight', nn.Parameter(ori_module.weight.data, requires_grad=False))
+        if bias is not None:
+            self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
+        else:
+            self.bias = None
+        self.a_qdq = a_qdq
+        self.w_qdq = w_qdq
+        self.step_cnt = 0
+        self.register_buffer('graph_stat_step', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
+        self.register_buffer('op_stat_status', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
+        self.register_buffer('quant_status', torch.tensor([0], dtype=torch.uint8, device=ori_module.weight.data.device))
+
+        for name, buf in ori_module.named_buffers():
+            if name.startswith('buf_'):
+                self.register_buffer(name, buf.data)
+        if hasattr(self, 'buf_rotate') and self.buf_rotate:
+            self.rotater = ori_module.rotater
+        else:
+            self.buf_rotate = False
+
+        if self.weight.data.dtype == torch.float8_e4m3fn:
+            self.fp8_forward = True
+            self.weight_scale_inv = ori_module.weight_scale_inv
+            self.block_size = ori_module.block_size
+        else:
+            self.fp8_forward = False
+    
+    @torch.no_grad()
+    def forward_func(self, x, w):
+        if self.fp8_forward:
+            y = block_wise_fp8_forward_func(
+                x, w, self.weight_scale_inv, self.block_size, self.bias
+            )
+        else:
+            y = torch.functional.F.linear(x, w, self.bias)
+        return y
+        
+
+    @torch.no_grad()
+    def forward(self, x):
+        if hasattr(self, 'buf_rotate') and self.buf_rotate:
+            x = self.rotater.rotate(x)
+        if self.graph_stat_step[0] == 0:
+            if self.quant_status[0] == 1:
+                if hasattr(self, "buf_weight"):
+                    w_qdq = self.buf_weight
+                else:
+                    w_qdq = self.w_qdq(self)
+                    self.register_buffer('buf_weight', w_qdq.data)
+            else:
+                w_qdq = self.weight
+            if self.op_stat_status[0] == 1 and self.recorder_qdq_w.num_of_elements == 0:
+                self.recorder_qdq_w.update(y_pred=w_qdq, y_real=self.weight.data)
+
+            if self.a_qdq is not None and self.quant_status[0] == 1:
+                x_qdq = self.a_qdq(x, self)
+                if self.op_stat_status[0] == 1 and x.shape[1] > 1:
+                    self.recorder_qdq_a.update(y_pred=x_qdq, y_real=x)
+            else:
+                x_qdq = x
+            y = self.forward_func(x_qdq, w_qdq)
+            if self.op_stat_status[0] == 1 and x.shape[1] > 1:
+                ori_y = self.forward_func(x, self.weight)
+                self.recorder_qdq_o.update(y_pred=y, y_real=ori_y)
+            return y
+        elif self.graph_stat_step[0] == 1:
+            if hasattr(self, "buf_weight"):
+                w_qdq = self.buf_weight
+            else:
+                w_qdq = self.w_qdq(self)
+                self.register_buffer('buf_weight', w_qdq.data)
+            if self.a_qdq is not None:
+                x = self.a_qdq(x, self)    
+            y = self.forward_func(x, w_qdq)
+            if x.shape[1] > 1: # TODO only stat prefill
+                self.tmp_qdq.append(y.cpu())
+            return y
+        elif self.graph_stat_step[0] == 2:
+            ori_y = self.forward_func(x, self.weight)
+            if self.step_cnt < len(self.tmp_qdq) and x.shape[1] > 1:
+                self.recorder_graph.update(
+                    y_pred=self.tmp_qdq[self.step_cnt].to(ori_y.device), y_real=ori_y,
+                )
+                self.step_cnt += 1
+            return ori_y
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, w_qdq, a_qdq, debug_print={}):
+
+        if module.bias is not None:
+            bias = module.bias.data
+        else:
+            bias = None
+
+        new_module = cls(bias, ori_module=module, w_qdq=w_qdq, a_qdq=a_qdq)
+
+        new_module.in_features = module.in_features
+        new_module.out_features = module.out_features
+        new_module.w_qdq_name = cls.get_func_name(w_qdq)
+        new_module.a_qdq_name = (
+            cls.get_func_name(a_qdq) if a_qdq is not None else 'None'
+        )
+        new_module.debug_print = debug_print
+        return new_module
+
+    @classmethod
+    def get_func_name(cls, any_callable):
+        if isinstance(any_callable, partial):
+            return any_callable.func.__name__
+        return any_callable.__name__
+
+    def __repr__(self):
+        return (
+            f'StatFakeQuantLinear(in_features={self.in_features},'
+            f'out_features={self.out_features},'
+            f'bias={self.bias is not None},'
+            f'weight_quant={self.w_qdq_name},'
+            f'act_quant={self.a_qdq_name},'
+            f'online_rotate={self.buf_rotate},'
+            f'fp8_forward={self.fp8_forward},'
+            f'debug_print={self.debug_print})'
+        )
 
 class VllmRealQuantLinear(nn.Module):
     def __init__(self, weight, bias, scales, input_scale, need_pack, scales_name):
@@ -1633,6 +1852,7 @@ _MODEL_LN_TYPES_PAIRS_ = {
     'Starcoder': LlmcLayerNorm,
     'Opt': LlmcLayerNorm,
     'Bloom': LlmcLayerNorm,
+    'Qwen25VL': LlmcQwen2RMSNorm,
 }
 
 
@@ -1646,6 +1866,8 @@ _LLMC_LN_TYPES_ = [
     LlmcInternLM2RMSNorm,
     LlmcGemma2RMSNorm,
     LlmcMiniCPMRMSNorm,
+    LlmcScaleRMSNorm,
+    OriginLlmcRMSNorm,
 ]
 
 

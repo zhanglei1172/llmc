@@ -1,0 +1,162 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    # Load spinquant-transformed model
+    path: /dataset/workspace/zhangl98/v5-0905/final_model/transformed_model/
+    torch_dtype: torch.float32
+calib:
+    -
+        name: wikitext2
+        download: False
+        path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+        n_samples: 256
+        bs: 16
+        seq_len: 2048
+        preproc: wikitext2_gptq
+        seed: *seed
+        cache_dir: 
+    # -
+    #     name: custom_mm
+    #     download: False
+    #     path: /dataset/workspace/zhangl98/dataset/deita-6k-v0_llmc/
+    #     apply_chat_template: True
+    #     add_answer: True
+    #     n_samples: 256
+    #     bs: 16
+    #     seq_len: 2048
+    #     padding: True
+    #     seed: *seed
+    # -
+    #     name: wikitext2
+    #     download: False
+    #     path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+    #     n_samples: 256
+    #     bs: 16
+    #     seq_len: 2048
+    #     preproc: wikitext2_gptq
+    #     seed: *seed
+    # -
+    #     name: V4_alpaca
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/alpaca_zh_data_100_test.json
+    #     n_samples: 32
+    #     bs: 8
+    #     seq_len: 2048
+    #     preproc: v4_general_preproc
+    #     seed: *seed
+    #     cache_dir: 
+    # -
+    #     name: V4_mmmu
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/mmmu_val_98_test_368length.json
+    #     n_samples: 32
+    #     bs: 8
+    #     seq_len: 2048
+    #     preproc: v4_general_preproc
+    #     seed: *seed
+    #     cache_dir: 
+    # -
+    #     name: V4_vqa
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/test_data_yans2_v7_no_intersection_normalized_v3_198.json
+    #     n_samples: 32
+    #     bs: 8
+    #     seq_len: 2048
+    #     preproc: v4_general_preproc
+    #     seed: *seed
+    #     cache_dir: 
+    # - 
+    #     name: V4_feedback
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/val_memory_v3_002.json
+    #     n_samples: 32
+    #     bs: 8
+    #     seq_len: 2048
+    #     preproc: v4_general_preproc
+    #     seed: *seed
+    # - 
+    #     name: V4_decision
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/V15_all_new.json
+    #     n_samples: 32
+    #     bs: 8
+    #     seq_len: 2048
+    #     preproc: v4_general_preproc
+    #     seed: *seed
+    #     special:
+    #         sptk_map_path: ./xq_eval/datasets_v4/V15_DEMO.sptk_map.json
+    # - 
+    #     name: V4_oms
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/test_v2_6_0617v6-相对坐标-right-560px_all.json
+    #     n_samples: 128
+    #     bs: 8
+    #     seq_len: 2048
+    #     preproc: v4_general_preproc
+    #     seed: *seed
+eval:
+    - 
+        eval_pos: [transformed, fake_quant]
+        name: wikitext2
+        type: ppl
+        download: False
+        path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+        seq_len: 2048
+        bs: 1
+        inference_per_block: False
+    # - 
+    #     eval_pos: [transformed, fake_quant]
+    #     type: vqa
+    #     name: [mmmu]
+    #     download: False
+    #     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+    #     bs: 1
+    #     limit: 200  # Limit test num for evaluation
+    #     inference_per_block: False
+quant:
+    method: GPTAQ
+    weight:
+        bit: 4
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+        calib_algo: mse
+        # minmax_fix: True
+    # act:
+    #     bit: 8
+    #     symmetric: True
+    #     granularity: per_tensor
+    #     # static: True
+    #     calib_algo: minmax
+    #     mix_bits:
+    #         setting_0:
+    #             layer_name: [down_proj]
+    #             do_quant: True
+    #             weight:
+    #                 bit: 4
+    #                 symmetric: True
+    #                 granularity: per_channel
+    #                 calib_algo: mse
+    #             act:
+    #                 bit: 16
+    #                 symmetric: True
+    #                 granularity: per_tensor
+    special:
+        actorder: True
+        static_groups: True
+        percdamp: 0.01
+        apha: 0.25
+        blocksize: 128
+        chunk_num: 4
+        true_sequential: True
+        online_rotate: False
+        fp32_had: True
+        # selected_layers: ["self_attn.v_proj", "mlp.up_proj", "mlp.down_proj", "mlp.gate_proj"]
+        # selected_blocks: ['26-28']
+    quant_out: True
+save:
+    # save_trans: True
+    save_fake: True
+    # save_path: /code/zhangl98@xiaopeng.com/llmc_test/work/out_qwen25vl_quarot_gptq
+    save_path: /code/final_model_gptq_

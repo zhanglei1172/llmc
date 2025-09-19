@@ -17,6 +17,16 @@ eval:
     - 
         eval_pos: [fake_quant]
         type: v4
+        name: vqa
+        download: False
+        path: ./xq_eval/datasets_v4/test_data_yans2_v7_no_intersection_normalized_v3_198.json
+        limit: -1
+        bs: 1
+        seq_len: 1024
+        seed: *seed
+    - 
+        eval_pos: [fake_quant]
+        type: v4
         name: mmmu
         download: False
         path: ./xq_eval/datasets_v4/mmmu_val_98_test_368length.json
@@ -27,7 +37,7 @@ eval:
     - 
         eval_pos: [fake_quant]
         type: v4
-        name: V4_decision
+        name: decision
         download: False
         path: ./xq_eval/datasets_v4/V15_all_new.json
         limit: -1
@@ -76,9 +86,9 @@ eval:
     #     bs: 1
     #     seq_len: 2048
     #     seed: *seed
-# ignored_layers:
-#     block_ids: [0-28]
-#     layer_names: ["mlp.down_proj"]
+ignored_layers:
+    block_ids: [0-28]
+    layer_names: ["mlp.down_proj"]
 quant:
     # vision:
     #     method: RTN

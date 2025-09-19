@@ -1,7 +1,32 @@
 import math
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
+from loguru import logger
+from .constant import (
+    QK_USE_FLOAT,
+    USE_COMPILE,
+)
+
+try:
+    from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Cache, apply_multimodal_rotary_pos_emb, repeat_kv
+except:
+    logger.warning("Failed to import Qwen model components")
+
+class LlmcQDQ(nn.Module):
+    def __init__(self, a_qdq=None):
+        super().__init__()
+        self.a1_qdq = a_qdq
+        self.calib = True
+
+    def forward(self, x1):
+        if self.a1_qdq is not None and not self.calib:
+            x1 = self.a1_qdq(x1, self)
+        return x1
+
+    def __repr__(self):
+        return f'LlmcQDQ(calib={self.calib})'
 
 
 class LlmcMatmul(nn.Module):
@@ -398,5 +423,163 @@ class LlmcDeepseekAttention(nn.Module):
 
         return attn_output, attn_weights, past_key_value
 
+class LlmcQwen2_5_VLAttention(nn.Module):
+    """
+    Multi-headed attention from 'Attention Is All You Need' paper. Modified to use sliding window attention: Longformer
+    and "Generating Long Sequences with Sparse Transformers".
+    """
 
-_LLMC_ATTN_MAP_ = {'Vit': LlmcViTSelfAttention, 'DeepseekV2': LlmcDeepseekAttention}
+    def __init__(self,
+                    ori_module, 
+                    config,
+                    layer_idx,
+                    matmul_a1_qdq,
+                    matmul_a2_qdq,
+                    softmax_a_qdq,
+                 ):
+        super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        if layer_idx is None:
+            logger.warning_once(
+                f"Instantiating {self.__class__.__name__} without passing `layer_idx` is not recommended and will "
+                "to errors during the forward call, if caching is used. Please make sure to provide a `layer_idx` "
+                "when creating this class."
+            )
+
+        self.hidden_size = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.hidden_size // self.num_heads
+        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.is_causal = True
+        self.attention_dropout = config.attention_dropout
+        self.rope_scaling = config.rope_scaling
+
+        if (self.head_dim * self.num_heads) != self.hidden_size:
+            raise ValueError(
+                f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
+                f" and `num_heads`: {self.num_heads})."
+            )
+        self.q_proj = ori_module.q_proj
+        self.k_proj = ori_module.k_proj
+        self.v_proj = ori_module.v_proj
+        self.o_proj = ori_module.o_proj
+
+        self.rotary_emb = ori_module.rotary_emb
+        self.matmul_1 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
+        # self.matmul_2 = LlmcMatmul(matmul_a1_qdq, matmul_a2_qdq)
+        self.matmul_2 = LlmcMatmul(None, matmul_a2_qdq)
+        # self.matmul_2 = LlmcMatmul(None, None)
+        # self.qdq1 = LlmcQDQ(a_qdq=matmul_a1_qdq)
+        # self.qdq2 = LlmcQDQ(a_qdq=matmul_a2_qdq)
+        # self.qdq3 = LlmcQDQ(a_qdq=matmul_a2_qdq)
+        # self.softmax = LlmcSoftmax(softmax_a_qdq)
+        self.softmax = LlmcSoftmax(None)
+        
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        cache_position: Optional[torch.LongTensor] = None,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        bsz, q_len, _ = hidden_states.size()
+
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+
+        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+
+        cos, sin = position_embeddings
+        query_states, key_states = apply_multimodal_rotary_pos_emb(
+            query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
+        )
+
+        if past_key_value is not None:
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
+            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+
+        if self.config._attn_implementation == "eager":
+            # repeat k/v heads if n_kv_heads < n_heads
+            attn_output, attn_weights = self._atten_func(query_states, key_states, value_states, attention_mask, output_attentions)
+        else:
+            raise NotImplementedError
+        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
+            raise ValueError(
+                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
+                f" {attn_output.size()}"
+            )
+
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.reshape(bsz, q_len, -1)
+
+        attn_output = self.o_proj(attn_output)
+
+        if not output_attentions:
+            attn_weights = None
+
+        return attn_output, attn_weights, past_key_value
+
+    @torch.compile(fullgraph=True, disable=not USE_COMPILE)
+    def _atten_func(self, query_states, key_states, value_states, attention_mask, output_attentions):
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
+
+        if QK_USE_FLOAT:
+            attn_weights = self.matmul_1(query_states.float(), key_states.transpose(2, 3).float()) / math.sqrt(self.head_dim)
+        else:
+            attn_weights = self.matmul_1(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+
+        if attention_mask is not None:  # no matter the length, we just slice it
+            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+            attn_weights = attn_weights + causal_mask
+
+        # Fix precision issues in Qwen2-VL float16 inference
+        # Replace inf values with zeros in attention weights to prevent NaN propagation
+        if query_states.dtype == torch.float16:
+            attn_weights = torch.where(torch.isinf(attn_weights), torch.zeros_like(attn_weights), attn_weights)
+
+        # upcast attention to fp32
+        attn_weights = self.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
+        if QK_USE_FLOAT:
+            attn_output = self.matmul_2(attn_weights.to(value_states.dtype), value_states)
+        else:
+            attn_output = self.matmul_2(attn_weights, value_states)
+        if not output_attentions:
+            return attn_output, None
+        else:
+            return attn_output, attn_weights
+
+    @classmethod
+    @torch.no_grad()
+    def new(cls, module, matmul_a1_qdq=None, matmul_a2_qdq=None, softmax_a_qdq=None):
+        config = module.config
+        layer_idx = module.layer_idx
+
+        new_module = cls(
+            module,
+            config=config,
+            layer_idx=layer_idx,
+            matmul_a1_qdq=matmul_a1_qdq,
+            matmul_a2_qdq=matmul_a2_qdq,
+            softmax_a_qdq=softmax_a_qdq,
+        )
+
+        return new_module
+
+_LLMC_ATTN_MAP_ = {
+    'Vit': LlmcViTSelfAttention,
+    'DeepseekV2': LlmcDeepseekAttention,
+    'Qwen25VL_V4': LlmcQwen2_5_VLAttention,
+    'Qwen25VL': LlmcQwen2_5_VLAttention,
+    }

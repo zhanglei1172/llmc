@@ -198,15 +198,38 @@ class Quarot(BaseBlockwiseQuantization):
                             qkv_bias = list(torch.split(prev_op[0].bias.data, self.hidden_size, dim=0))
                             v_bias = qkv_bias[-1].clone()
                             prev_op[0].bias.data = v_bias
-                        apply_exact_had_to_linear(prev_op[0], had_dim=self.head_dim, output=True, R2=self.R2)
+                        # apply_exact_had_to_linear(prev_op[0], had_dim=self.head_dim, output=True, R2=self.R2)
+                        self.rotate_ov_proj(prev_op[0], layers[0])
                         qkv_data[-1] = prev_op[0].weight.data
                         prev_op[0].weight.data = torch.cat(qkv_data, dim=0)
                         if prev_op[0].bias is not None:
                             qkv_bias[-1] = prev_op[0].bias.data
                             prev_op[0].bias.data = torch.cat(qkv_bias, dim=0)
                     else:
-                        apply_exact_had_to_linear(prev_op[0], had_dim=self.head_dim, output=True, R2=self.R2)
-                apply_exact_had_to_linear(layers[0], had_dim=self.head_dim, output=False, R2=self.R2)
+                        # apply_exact_had_to_linear(prev_op[0], had_dim=self.head_dim, output=True, R2=self.R2)
+                        self.rotate_ov_proj(prev_op[0], layers[0])
+                # apply_exact_had_to_linear(layers[0], had_dim=self.head_dim, output=False, R2=self.R2)
+                
+
+    def rotate_ov_proj(self, v_proj, o_proj):
+        # v_proj output
+        dtype = v_proj.weight.data.dtype
+        W_ = v_proj.weight.data.double()
+        shape = W_.shape
+        W_ = W_.reshape(shape[0]//self.head_dim, self.head_dim, -1)
+        v_proj.weight.data = torch.matmul(self.R2.T.unsqueeze(0), W_).reshape(shape).to(dtype=dtype)
+        if v_proj.bias is not None:
+            B_ = v_proj.bias.data.double()
+            shape = B_.shape
+            B_ = B_.reshape(shape[0]//self.head_dim, self.head_dim,-1)
+            v_proj.bias.data = torch.matmul(self.R2.T, B_).flatten().to(dtype=dtype)
+        
+        # o_proj input
+        dtype = o_proj.weight.data.dtype
+        W_ = o_proj.weight.data.double()
+        shape = W_.shape
+        W_ = W_.reshape(-1, shape[-1]//self.head_dim, self.head_dim) 
+        o_proj.weight.data = torch.matmul(W_, self.R2).reshape(shape).to(dtype=dtype)
 
     @torch.no_grad()
     def save_model(self, path):

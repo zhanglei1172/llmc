@@ -22,6 +22,13 @@ from llmc.compression.quantization.module_utils import (
     LlmcFp8Linear,
 )
 
+from llmc.compression.quantization.utils import (
+    check_do_quant,
+    get_wquantizer,
+    get_aquantizer,
+    check_w_only,
+)
+
 
 class BaseModel(metaclass=ABCMeta):
     def __init__(self, config, device_map=None, use_cache=False):
@@ -456,11 +463,69 @@ class BaseModel(metaclass=ABCMeta):
         else:
             layers_dict = subset['layers']
 
+        is_quant_param = (params_dict.get("w_qdq") or params_dict.get("a_qdq")) is not None
+
         for name, m in layers_dict.items():
             if hasattr(m, 'no_quant') and m.no_quant:
                 continue
 
-            M = module.new(m, **params_dict)
+            
+
+            if is_quant_param and params_dict.get("mix_bits", False) and not check_do_quant(
+                            block_idx,
+                            name,
+                            params_dict["mix_bits_map"],
+                            params_dict["quantizer_mix_bits"],
+                        ):
+                M = module.new(m, **{k:v for k, v in params_dict.items() if k not in ("w_qdq", "a_qdq")})
+
+            elif is_quant_param and params_dict.get("mix_bits", False):
+                params_dict_tmp = {}
+                params_dict_tmp["debug_print"] = {}
+                wquantizer = get_wquantizer(
+                    block_idx,
+                    name,
+                    params_dict["mix_bits_map"],
+                    params_dict["quantizer_mix_bits"],
+                    params_dict["wquantizer_default"],
+                )
+                params_dict_tmp["w_qdq"] = partial(
+                    params_dict["w_qdq"], wquantizer=wquantizer
+                )
+                params_dict_tmp["debug_print"]["weight"] = {}
+                params_dict_tmp["debug_print"]["weight"]["bit"] = wquantizer.bit
+                params_dict_tmp["debug_print"]["weight"]["sym"] = wquantizer.sym
+                params_dict_tmp["debug_print"]["weight"][
+                    "granularity"
+                ] = wquantizer.granularity
+                if not check_w_only(
+                    block_idx,
+                    name,
+                    params_dict["mix_bits_map"],
+                    params_dict["quantizer_mix_bits"],
+                    params_dict["w_only_default"],
+                ):
+                    aquantizer = get_aquantizer(
+                        block_idx,
+                        name,
+                        params_dict["mix_bits_map"],
+                        params_dict["quantizer_mix_bits"],
+                        params_dict["aquantizer_default"],
+                    )
+                    params_dict_tmp["a_qdq"] = partial(
+                        params_dict["a_qdq"], aquantizer=aquantizer
+                    )
+                    params_dict_tmp["debug_print"]["act"] = {}
+                    params_dict_tmp["debug_print"]["act"]["bit"] = aquantizer.bit
+                    params_dict_tmp["debug_print"]["act"]["sym"] = aquantizer.sym
+                    params_dict_tmp["debug_print"]["act"][
+                        "granularity"
+                    ] = aquantizer.granularity
+                else:
+                    params_dict_tmp["a_qdq"] = None
+                M = module.new(m, **params_dict_tmp)
+            else:
+                M = module.new(m, **params_dict)
 
             name_tmp = name.rsplit('.', 1)
             if len(name_tmp) == 2:
@@ -508,3 +573,10 @@ class BaseModel(metaclass=ABCMeta):
 
     def before_save_model(self):
         pass
+
+    def get_interested_layers(self) -> list:
+        return self.get_head_layers()
+
+    def get_quantable_subset_names(self):
+        return ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj',
+               'self_attn.o_proj', 'mlp.gate_proj', 'mlp.up_proj', 'mlp.down_proj']

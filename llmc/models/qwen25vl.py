@@ -9,6 +9,7 @@ from transformers import AutoConfig, AutoProcessor, AutoTokenizer
 
 try:
     from transformers import Qwen2_5_VLForConditionalGeneration
+    from transformers.models.qwen2_5_vl import modeling_qwen2_5_vl
 except Exception:
     logger.warning(
         'Can not import Qwen2_5_VLForConditionalGeneration. '
@@ -25,6 +26,7 @@ except Exception:
 
 from llmc.utils.registry_factory import MODEL_REGISTRY
 from llmc.utils import resize_image
+from llmc.compression.quantization.constant import ATTN_IMPL
 
 from .qwen25 import Qwen25
 
@@ -33,6 +35,10 @@ from .qwen25 import Qwen25
 class Qwen25VL(Qwen25):
     def __init__(self, config, device_map=None, use_cache=False):
         super().__init__(config, device_map, use_cache)
+        modeling_qwen2_5_vl.Qwen2_5_VLAttention.forward = torch.compile()(modeling_qwen2_5_vl.Qwen2_5_VLAttention.forward)
+        # blocks = self.get_blocks()
+        # for block in blocks:
+        #     block.self_attn.forward = torch.compile(block.self_attn.forward)
 
     def build_model(self):
         self.eval_name = 'Qwen25VLEval'
@@ -43,12 +49,15 @@ class Qwen25VL(Qwen25):
             if hasattr(self.vlm_model_config, 'use_cache'):
                 self.vlm_model_config.use_cache = False
         logger.info(f'self.vlm_model_config : {self.vlm_model_config}')
+        # from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLAttention
+        # Qwen2_5_VLAttention.forward = torch.compile(Qwen2_5_VLAttention.forward)
         self.vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             self.model_path,
             config=self.vlm_model_config,
             trust_remote_code=True,
             torch_dtype=self.torch_dtype,
             low_cpu_mem_usage=True,
+            attn_implementation=ATTN_IMPL,
         )
         self.mm_model = self.vlm_model
         logger.info(f'self.vlm_model : {self.vlm_model}')
@@ -79,48 +88,59 @@ class Qwen25VL(Qwen25):
         if self.tokenizer is not None:
             self.tokenizer.padding_side = 'left'
 
-    def batch_process(self, img_qas, calib_or_eval='eval', apply_chat_template=True, return_inputs=True): # noqa
+    def batch_process(self, img_qas, calib_or_eval='eval', apply_chat_template=True, return_inputs=True, calib_cfg=None): # noqa
         assert calib_or_eval == 'calib' or calib_or_eval == 'eval'
         assert apply_chat_template
-        messages = []
-        answers = []
-        for idx in range(len(img_qas)):
-            img_path = img_qas[idx]['image']
-            if img_path is not None:
-                content = []
-                if not isinstance(img_path, list):
-                    img_path = [img_path]
-                for img_idx in range(len(img_path)):
-                    content.append({'type': 'image', 'image': resize_image(img_path[img_idx], 560, 560)})
-                content.append({'type': 'text', 'text': img_qas[idx]['question']})
-                message = [
-                    {
-                        'role': 'user',
-                        'content': content
-                    }
-                ]
-            else:
-                message = [
-                    {
-                        'role': 'user',
-                        'content': [
-                            {'type': 'text', 'text': img_qas[idx]['question']}
-                        ]
-                    }
-                ]
-            messages.append(message)
-            answers.append(img_qas[idx]['answer'] + '<|im_end|>')
-        texts = [
-            self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
-            for msg in messages
-        ]
-        if calib_or_eval == 'calib' and self.config['calib'].get('add_answer', False):
+        if calib_cfg is None:
+            calib_cfg = self.config.get(calib_or_eval, {})
+        if isinstance(img_qas[0], list):
+            messages = img_qas
             texts = [
-                texts[n] + answers[n]
-                for n in range(len(texts))
+                self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=False)
+                for msg in messages
             ]
-        if calib_or_eval == 'calib':
-            logger.info(f'Calib data is:\n{texts}')
+        else:
+            messages = []
+            answers = []
+            for idx in range(len(img_qas)):
+                img_path = img_qas[idx]['image']
+                if img_path is not None:
+                    content = []
+                    if not isinstance(img_path, list):
+                        img_path = [img_path]
+                    for img_idx in range(len(img_path)):
+                        content.append({'type': 'image', 'image': resize_image(img_path[img_idx], 560, 560)})
+                    content.append({'type': 'text', 'text': img_qas[idx]['question']})
+                    message = [
+                        {
+                            'role': 'user',
+                            'content': content
+                        }
+                    ]
+                else:
+                    message = [
+                        {
+                            'role': 'user',
+                            'content': [
+                                {'type': 'text', 'text': img_qas[idx]['question']}
+                            ]
+                        }
+                    ]
+                messages.append(message)
+                answers.append(img_qas[idx]['answer'] if img_qas[idx]['answer'].endswith('<|im_end|>') else img_qas[idx]['answer'] + '<|im_end|>')
+
+
+            texts = [
+                self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+                for msg in messages
+            ]
+            if calib_or_eval == 'calib' and calib_cfg.get('add_answer', False):
+                texts = [
+                    texts[n] + answers[n]
+                    for n in range(len(texts))
+                ]
+        # if calib_or_eval == 'calib':
+        #     logger.info(f'Calib data is:\n{texts}')
         if not return_inputs:
             return texts
         image_inputs, video_inputs = process_vision_info(messages)
@@ -128,10 +148,11 @@ class Qwen25VL(Qwen25):
             text=texts,
             images=image_inputs,
             videos=video_inputs,
-            padding="max_length" if self.config.get(calib_or_eval, {}).get('padding', True) else False,
-            max_length=self.config.get(calib_or_eval, {}).get('seq_len', None),
+            padding="max_length" if calib_cfg.get('padding', True) else False,
+            max_length=calib_cfg.get('seq_len', None),
+            truncation=True,
             return_tensors='pt',
-        ).to(next(self.vlm_model.parameters()).dtype)
+        )#.to(next(self.vlm_model.parameters()).dtype)
         return inputs
 
     def find_blocks(self):

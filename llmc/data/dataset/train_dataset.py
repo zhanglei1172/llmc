@@ -20,9 +20,20 @@ class TrainJsonDataset(torch.utils.data.IterableDataset):
 
         if tokenized_datasets:
             grouped_dataset = self.group_texts(tokenized_datasets)
-            self.data.extend({
-                'input_ids': grouped_dataset['input_ids'][i], 
-                'labels': grouped_dataset['labels'][i]} for i in range(len(grouped_dataset['input_ids'])))
+            if self.data:
+                attention_mask = torch.ones((block_size), dtype=torch.int64)
+                grouped_dataset['input_ids'] = torch.from_numpy(np.array(grouped_dataset['input_ids']))
+                self.data.extend({
+                    'input_ids': grouped_dataset['input_ids'][i], 
+                    'attention_mask': attention_mask,
+                    'labels': grouped_dataset['input_ids'][i]
+                    }
+                    for i in range(len(grouped_dataset['input_ids']))
+                )
+            else:
+                self.data.extend({
+                    'input_ids': grouped_dataset['input_ids'][i], 
+                    'labels': grouped_dataset['labels'][i]} for i in range(len(grouped_dataset['input_ids'])))
         keys = set()
         for d in self.data:
             keys.update(d.keys())

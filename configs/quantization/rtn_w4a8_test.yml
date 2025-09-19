@@ -2,7 +2,7 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL_V4
-    path: /dataset/workspace/zhangl98/v4-0807/w8a8/spinquant_sm/transformed_model/ 
+    path: /code/llmc_out/w4a8/v4_ostquant_nodown_sft/transformed_model/ 
     torch_dtype: torch.float32
 calib:
     name: wikitext2
@@ -14,25 +14,16 @@ calib:
     preproc: wikitext2_gptq
     seed: *seed
 eval:
-    # - 
-    #     eval_pos: [fake_quant]
-    #     name: wikitext2
-    #     type: ppl
-    #     download: False
-    #     path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
-    #     seq_len: 2048
-    #     bs: 1
-    #     inference_per_block: False
-    # - 
-    #     eval_pos: [fake_quant]
-    #     type: vqa
-    #     name: [mmmu]
-    #     download: False
-    #     path: /workspace/lim42@xiaopeng.com/dataset/mme/
-    #     bs: 1
-    #     limit: -100  # Limit test num for evaluation
-    #     inference_per_block: False
-        
+    - 
+        eval_pos: [fake_quant]
+        type: v4
+        name: vqa
+        download: False
+        path: ./xq_eval/datasets_v4/test_data_yans2_v7_no_intersection_normalized_v3_198.json
+        limit: -1
+        bs: 1
+        seq_len: 1024
+        seed: *seed
     - 
         eval_pos: [fake_quant]
         type: v4
@@ -46,7 +37,7 @@ eval:
     - 
         eval_pos: [fake_quant]
         type: v4
-        name: V4_decision
+        name: decision
         download: False
         path: ./xq_eval/datasets_v4/V15_all_new.json
         limit: -1
@@ -75,16 +66,16 @@ eval:
         bs: 1
         seq_len: 2048
         seed: *seed
-    - 
-        eval_pos: [fake_quant]
-        type: v4
-        name: alpaca
-        download: False
-        path: ./xq_eval/datasets_v4/alpaca_zh_data_100_test.json
-        limit: -1
-        bs: 1
-        seq_len: 2048
-        seed: *seed
+    # - 
+    #     eval_pos: [fake_quant]
+    #     type: v4
+    #     name: alpaca
+    #     download: False
+    #     path: ./xq_eval/datasets_v4/alpaca_zh_data_100_test.json
+    #     limit: -1
+    #     bs: 1
+    #     seq_len: 2048
+    #     seed: *seed
     # - 
     #     eval_pos: [fake_quant]
     #     type: v4
@@ -95,9 +86,9 @@ eval:
     #     bs: 1
     #     seq_len: 2048
     #     seed: *seed
-# ignored_layers:
-#     block_ids: [0-28]
-#     layer_names: ["mlp.down_proj"]
+ignored_layers:
+    block_ids: [0-28]
+    layer_names: ["mlp.down_proj"]
 quant:
     # vision:
     #     method: RTN
@@ -118,11 +109,12 @@ quant:
             symmetric: True
             granularity: per_channel
             group_size: -1
-            calib_algo: mse
+            # calib_algo: mse
         act:
             bit: 8
             symmetric: True
             granularity: per_tensor
+            quant_attn: True
 # save:
 #     # save_trans: True
 #     save_fake: False

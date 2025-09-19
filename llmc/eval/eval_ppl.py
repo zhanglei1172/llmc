@@ -13,8 +13,11 @@ from .eval_base import BaseEval
 class PerplexityEval(BaseEval):
     @torch.no_grad()
     def eval_func(self, model, testenc, seq_len, bs, eval_pos):
-        testenc = testenc.input_ids
-        nsamples = testenc.numel() // seq_len
+        if isinstance(testenc, list):
+            testenc = torch.cat([x.input_ids for x in testenc], dim=1)
+        else:
+            testenc = testenc.input_ids
+        nsamples = self.num_samples if (self.num_samples and self.num_samples>0) else testenc.numel() // seq_len 
 
         nlls = []
 
