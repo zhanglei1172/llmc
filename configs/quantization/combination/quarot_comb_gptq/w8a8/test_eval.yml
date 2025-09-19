@@ -2,36 +2,30 @@ base:
     seed: &seed 0
 model:
     type: Qwen25VL
-    path: /workspace/gaoy25@xiaopeng.com/leizhang/out/spin0704/transformed_model/
+    path: /workspace/gaoy25@xiaopeng.com/v3_datas/original_model/v0-20250601-000047/
     tokenizer_mode: slow
     torch_dtype: auto
 eval:
-    eval_pos: [pretrain]
+    eval_pos: [pretrain, transformed, fake_quant]
     name: wikitext2
     download: False
-    path: /workspace/gaoy25@xiaopeng.com/leizhang/dataset/eval/wikitext2
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
     seq_len: 2048
     # For 7B / 13B model eval, bs can be set to "1", and inference_per_block can be set to "False".
     # For 70B model eval, bs can be set to "20", and inference_per_block can be set to "True".
-    bs: 10
-    inference_per_block: True
+    bs: 1
+    inference_per_block: False
 quant:
-    method: SpinQuant
+    method: PrefixQuant
     weight:
         bit: 8
         symmetric: True
         granularity: per_channel
         group_size: -1
-        calib_algo: 
-        ste: True
     act:
         bit: 8
         symmetric: True
         granularity: per_token
-        qmax_to_tensor: True
-        ste: True
     special:
-        rotate_mode: hadamard
-        fp32_had: True
-        online_rotate: False
+        prefixed_tokens: [128000]
 

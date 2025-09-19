@@ -1,3 +1,4 @@
+import copy
 import gc
 import os
 from functools import partial
@@ -6,9 +7,14 @@ import json
 import torch
 import torch.nn as nn
 from loguru import logger
+from transformers import (default_data_collator, AutoTokenizer)
 
 from llmc.utils.registry_factory import ALGO_REGISTRY
+from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
+from llmc.utils.registry_factory import MODEL_REGISTRY
 
+from .train_utils.fsdp_trainer import MyTrainer
+from .train_utils.train_utils import LLMCTrainingArguments
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import *
@@ -34,6 +40,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             self.preprocess()
         else:
             raise ValueError(f'Unsupported modality {self.modality}')
+
+        self.avaliable_train_state = ["train_rotate_quant"]
 
     def vision_preprocess(self):
         for m in self.model.modality_model.parameters():
@@ -98,6 +106,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         self.rotate_mode = self.quant_config['special']['rotate_mode']
         self.weight_rotate = True
         self.w_rotater = WeightRotater(weight_rotate_func=self.rotate_weight, dev=self.dev)
+        self.lwc = self.quant_config['special'].get('lwc', False)
         # self.o_proj_group_quant = self.quant_config['special']['o_proj_group_quant']
 
     def preprocess(self):
@@ -228,7 +237,7 @@ class SpinQuant(BaseBlockwiseQuantization):
             block.cuda()
             logger.info(f'Start apply {idx}-th block rotate weights')
             for name, module in block.named_modules():
-                if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear)):
+                if isinstance(module, (RotateLinear2, FakeQuantLinear, RotateFakeQuantLinear, LlmcScaleRMSNorm)):
                     weight, bias = module._rotate_weight()
                     module.weight.data = weight.data
                     if bias is not None:
@@ -306,13 +315,74 @@ class SpinQuant(BaseBlockwiseQuantization):
             )
             vision_embed.cpu()
 
-    def get_orthogonal_matrix(self, size):
+    def get_orthogonal_matrix(self, size, layer=None):
         if self.rotate_mode == 'random':
             return random_orthogonal_matrix(size, self.dev)
         elif self.rotate_mode == 'hadamard':
             return random_hadamard_matrix(size, self.dev)
+        elif self.rotate_mode == 'klt':
+            if layer is None:
+                params = []
+                for block in self.blocks:
+                    q,k,v,up,gate = block.self_attn.q_proj,block.self_attn.k_proj,block.self_attn.v_proj,block.mlp.up_proj,block.mlp.gate_proj
+                    for m in (q,k,v,up,gate):
+                        params.append(m.weight)
+                params = torch.cat(params,dim=0)
+                params = params-params.mean(dim=0)
+                cov_matrix = torch.cov(params.float().T) 
+                eigs,eiv =  torch.linalg.eigh(cov_matrix)
+                H = random_hadamard_matrix(params.size(-1),self.dev) 
+                return (eiv.to(self.dev).double()@H).float()
+            else:
+                head_dim = size
+                o,v = layer.self_attn.o_proj,layer.self_attn.v_proj
+                oc,ic = o.weight.shape
+                flat_wo  = o.weight.reshape(oc,self.num_key_value_heads,-1,head_dim)
+                ret = list()
+                for i in range(self.num_key_value_heads):
+                    params = flat_wo[:,i].reshape(-1,head_dim) 
+                    params = params-params.mean(dim=0) 
+                    cov_matrix = torch.cov(params.float().T)
+                    eigs,eiv = torch.linalg.eigh(cov_matrix)
+                    H = random_hadamard_matrix(params.size(-1),o.weight.device)
+                    ret.append((eiv.to(self.dev).double()@H).float())
+                return torch.stack(ret, dim=0)
         else:
             raise ValueError(f'Unsupported mode {self.mode}')
+
+    def register_lwc_parameters(self, layers, init_value=4.0):
+        for m in layers:
+            if self.wquantizer.granularity == 'per_group':
+                dim = int(
+                    m.weight.data.shape[0]
+                    * math.ceil(
+                        m.weight.data.shape[1] / self.wquantizer.group_size
+                    )
+                )
+            else:
+                dim = m.weight.data.shape[0]
+            if self.wquantizer.sym:
+                low_param = None
+            else:
+                low_param = nn.Parameter(
+                    torch.ones(
+                        (dim, 1),
+                        device=self.dev,
+                        dtype=self.dtype,
+                    )
+                    * init_value
+                )
+            up_param = nn.Parameter(
+                torch.ones(
+                    (dim, 1),
+                    device=self.dev,
+                    dtype=self.dtype,
+                )
+                * init_value
+            )
+
+        m.register_parameter('buf_upbound_factor', up_param)
+        m.register_parameter('buf_lowbound_factor', low_param)
 
     def block_transform(self, block):
         logger.info(f'Start transform the {self.block_idx+1}-th block')
@@ -320,7 +390,10 @@ class SpinQuant(BaseBlockwiseQuantization):
         subsets = self.model.get_subsets_in_block(block)
         for index, subset in enumerate(subsets):
             self.subset_transform(block, subset)
+            if self.lwc:
+                self.register_lwc_parameters(subset['layers'].values())
 
+        self.set_non_linear_mode('fake_quant', block, False)
         self.model.replace_module_block(LlmcRMSNorm, block, self.block_idx, {})
 
         logger.info(f'block:{block}')
@@ -343,8 +416,11 @@ class SpinQuant(BaseBlockwiseQuantization):
                 m = layers_dict[n]
                 self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=False)
             if 'is_mlp' not in subset or not subset['is_mlp']:
-                Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
-                subset['inspect'].Q2 = RotateModule(Q2)
+                if self.rotate_mode == 'klt':
+                    Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads, block)
+                else:
+                    Q2 = torch.stack([self.get_orthogonal_matrix(self.hidden_size // self.num_heads) for _ in range(self.num_key_value_heads)], dim=0)
+                block.Q2 = RotateModule(Q2)
 
         else:
             if self.config['model']['type'] in ['Opt']:
@@ -357,9 +433,9 @@ class SpinQuant(BaseBlockwiseQuantization):
                     apply_exact_had_to_linear(m, had_dim=-1, output=False)
                 self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=None, transpose=True)
             else:
-                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=True)
-                self.replace_rotate_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=self._get_block_Q2(block), transpose=False)
-    
+                self.replace_rotate_fc(block, n, m, Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=True)
+                self.replace_rotate_fc(block, f'{self._atten_inspect_name}.v_proj', prev_op[0], Q1=self.model.modality_model.Q1, Q2=block.Q2, transpose=False)
+
 
     def _get_block_Q2(self, block):
         if hasattr(block, 'self_attn') and hasattr(block.self_attn, 'Q2'):
@@ -412,12 +488,22 @@ class SpinQuant(BaseBlockwiseQuantization):
             logger.info(self.model.model)
 
             params_dict = {}
-            params_dict['w_qdq'] = partial(self.w_qdq_tmp, wquantizer=self.wquantizer)
-            params_dict['a_qdq'] = (
-                partial(self.a_qdq, aquantizer=self.aquantizer)
-                if not self.w_only
-                else None
-            )
+            if not self.mix_bits:
+                params_dict["a_qdq"] = (
+                    partial(self.a_qdq, aquantizer=self.aquantizer)
+                    if not self.w_only
+                    else None
+                )
+                params_dict["w_qdq"] = partial(self.w_qdq_tmp, wquantizer=self.wquantizer)
+            else:
+                params_dict["mix_bits"] = True
+                params_dict["a_qdq"] = self.a_qdq
+                params_dict["w_qdq"] = self.w_qdq_tmp
+                params_dict["mix_bits_map"] = self.mix_bits_map
+                params_dict["quantizer_mix_bits"] = self.quantizer_mix_bits
+                params_dict["wquantizer_default"] = self.wquantizer
+                params_dict["aquantizer_default"] = self.aquantizer
+                params_dict["w_only_default"] = self.w_only
             if self.modality == 'vision':
                 self.model.replace_vision_module_all(
                     RotateFakeQuantLinear, params_dict
@@ -440,6 +526,8 @@ class SpinQuant(BaseBlockwiseQuantization):
                     torch.save(state_dict, os.path.join(self.config.save.save_path,'rotate_weight.pth'))
                 self.apply_rotate_weight()
                 super().deploy(quant_format)
+        if quant_format == 'origin_float':
+            self.set_non_linear_mode('fake_quant', self.model.model, True)
 
     @torch.no_grad()
     def save_model(self, path):
@@ -451,3 +539,107 @@ class SpinQuant(BaseBlockwiseQuantization):
             config['tie_word_embeddings'] = False
         with open(path, 'w') as f:
             json.dump(config, f, indent=4)
+
+    def train(self, tokenizer=None):
+        # ignored_modules = []
+        llmc_model_to_train = copy.deepcopy(self.model)
+        llmc_model_to_train.config.calib = self.config.train.data
+        # ignored_modules.extend(self.get_ignored_modules(llmc_model_to_train))
+        llmc_model_to_train.model.config.use_cache = False
+
+        dataset = MixDataset(tokenizer.get_tokenizer(), self.config.train.data, llmc_model_to_train.batch_process, llmc_model_to_train.processor)
+        model_max_length=self.config.train.data[0].seq_len if isinstance(self.config.train.data, list) else self.config.train.data.seq_len
+        train_tokenizer = AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path=self.config.model.path,
+            cache_dir=getattr(self.config.train.data, "cache_dir", None),
+            model_max_length=model_max_length,
+            padding_side='right',
+            use_fast=True,
+            add_eos_token=False,
+            add_bos_token=False,
+        )
+        if llmc_model_to_train.processor:
+            llmc_model_to_train.processor.tokenizer = train_tokenizer
+
+
+        # if 'eval' in config and len(config.eval.eval_pos):
+        #     eval_list = []
+        #     name_list = (
+        #         config.eval.name
+        #         if not isinstance(config.eval.name, str)
+        #         else [config.eval.name]
+        #     )
+        #     for name in name_list:
+        #         eval_config = copy.deepcopy(config.eval)
+        #         eval_config.name = name
+        #         if len(name_list) != 1:  # eval multi datasets
+        #             eval_config.path = os.path.join(config.eval.path, name)
+        #         ppl_eval = PerplexityEval(self.model, eval_config)
+        #         eval_list.append(ppl_eval)
+        train_data = TrainJsonDataset(
+            dataset.get_raw_calib_dataset(),
+            train_tokenizer,
+            block_size=model_max_length,
+        )
+
+        train_args = LLMCTrainingArguments(**self.config.train.train_args)
+        # trainable_parameters = self.get_trainable_params(llmc_model_to_train)
+        llmc_model_to_train.model.seqlen = model_max_length
+        # optimizer = SGDG(trainable_parameters, lr=self.config.train.train_args.learning_rate, stiefel=True)
+        # FSDPTrainer._optimizer = optimizer
+        need_teacher = train_args.special.get("loss_type", 'origin') not in  ("origin", "DFT")
+        if need_teacher:
+            _backup = self.config.model.path
+            if train_args.special.get("teacher_path"):
+                self.config.model.path = train_args.special.get("teacher_path")
+            teacher_model = MODEL_REGISTRY[self.config.model.type](self.config).model
+            self.config.model.path = _backup
+            teacher_model.eval()
+            for param in teacher_model.parameters():
+                param.requires_grad = False
+            teacher_model.config.use_cache = False
+            llmc_model_to_train.model.teacher = TeacherModel(teacher_model)
+        # from trl.trainer.utils import DataCollatorForCompletionOnlyLM
+        # from accelerate.utils import operations
+        from llmc.utils import patch
+        from types import MethodType
+        # _concatenate = operations.concatenate
+        # operations.concatenate = patch.concatenate
+        train_tokenizer.pad = MethodType(patch.pad, train_tokenizer)
+        trainer = MyTrainer(
+            model=llmc_model_to_train.model,
+            tokenizer=train_tokenizer,
+            args=train_args,
+            train_dataset=train_data,
+            eval_dataset=None,
+            # data_collator=default_data_collator,
+            # data_collator=patch.CustomDataCollatorForCompletionOnlyLM("<|im_start|>assistant\n", tokenizer=train_tokenizer, pad_to_multiple_of=8),
+            data_collator=patch.CustomDataCollatorForCompletionOnlyLM([-1], tokenizer=train_tokenizer, pad_to_multiple_of=8),
+            # optimizers=(optimizer, None),
+            # optimizers=(None, None),
+            # ignored_modules=ignored_modules,
+        )
+        
+        torch.distributed.barrier()
+
+        res = trainer.train()
+        # operations.concatenate = _concatenate
+        # if int(os.environ['RANK']) == 0:
+        #     import nni
+        #     nni.report_final_result(res.training_loss)
+        
+        torch.distributed.barrier()
+
+        logger.info('End training')
+        if need_teacher:
+            del llmc_model_to_train.model.teacher, teacher_model
+        
+
+        # self.model.model.to('cpu')
+        # self.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
+        state_dict = trainer.get_trained_params()
+        model_state = self.model.model.state_dict()
+        for name, param in model_state.items():
+            if name in state_dict:
+                # 保持原 device，只拷贝数据
+                param.copy_(state_dict[name].to(param.device, dtype=param.dtype))

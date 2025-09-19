@@ -73,6 +73,15 @@ class Qwen25(BaseModel):
         )
         return text
 
+    def get_matmul_in_block(self, block):
+        return {
+            'self_attn.matmul_1': block.self_attn.matmul_1,
+            'self_attn.matmul_2': block.self_attn.matmul_2,
+        }
+
+    def get_softmax_in_block(self, block):
+        return {'self_attn.softmax': block.self_attn.softmax}
+
     def get_subsets_in_block(self, block):
         return [
             {

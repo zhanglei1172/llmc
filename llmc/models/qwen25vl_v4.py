@@ -8,7 +8,7 @@ import torch.nn as nn
 from accelerate import Accelerator, DistributedType
 from loguru import logger
 from transformers import AutoConfig, AutoProcessor, AutoTokenizer
-
+from llmc.compression.quantization.constant import ATTN_IMPL
 try:
     from transformers import Qwen2_5_VLForConditionalGeneration
 except Exception:
@@ -51,6 +51,7 @@ class Qwen25VL_V4(Qwen25VL):
             trust_remote_code=True,
             torch_dtype=self.torch_dtype,
             low_cpu_mem_usage=True,
+            attn_implementation=ATTN_IMPL, # TODO for quant_attn
         )
 
         class ExpandVocabLinear(nn.Module):

@@ -4,6 +4,7 @@ import math
 import os
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
+import re
 
 import torch
 import torch.distributed as dist
@@ -101,11 +102,19 @@ class GPTQ(BaseBlockwiseQuantization):
         subset_kwargs,
     ):
         layers_dict = subset['layers']
+        if self.selected_block_ids and self.block_idx not in self.selected_block_ids:
+            logger.info(
+                f'Skipping block {self.block_idx} as it is not in selected blocks.'
+            )
+            return
         for name in layers_dict:
             layer = layers_dict[name]
             if not isinstance(
                 layer, tuple(_LLMC_LINEAR_TYPES_ + _TRANSFORMERS_LINEAR_TYPES_)
             ):
+                continue
+            if self.selected_layers and name not in self.selected_layers:
+                logger.info(f'Skipping layer {name} as it is not in selected layers.')
                 continue
             self.layer_transform(layer, name)
             self.free(name)

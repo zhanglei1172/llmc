@@ -77,6 +77,7 @@ class BaseQuantizer(object):
         self.mse_b_num = self.kwargs.get('mse_b_num', 1)
         self.maxshrink = self.kwargs.get('maxshrink', 0.8)
         self.mse_grid = self.kwargs.get('mse_grid', 100)
+        self.minmax_fix = self.kwargs.get('minmax_fix', False)
 
         # hist config
         self.bins = self.kwargs.get('bins', 2048)
@@ -550,7 +551,10 @@ class BaseQuantizer(object):
         if self.sym:
             abs_max = torch.max(max_val.abs(), min_val.abs())
             abs_max = abs_max.clamp(min=1e-5)
-            scales = abs_max / qmax
+            if self.minmax_fix:
+                scales = abs_max / ((qmax - qmin).to(abs_max.dtype) / 2)
+            else:
+                scales = abs_max / qmax
             zeros = torch.tensor(0.0)
         else:
             scales = (max_val - min_val).clamp(min=1e-5) / (qmax - qmin)
@@ -1312,7 +1316,10 @@ class Weight48IntegerQuantizer(BaseQuantizer):
         if sym:
             abs_max = torch.max(max_val.abs(), min_val.abs())
             abs_max = abs_max.clamp(min=1e-5)
-            scales = abs_max / qmax
+            if self.minmax_fix:
+                scales = abs_max / ((qmax - qmin).to(abs_max.dtype) / 2)
+            else:
+                scales = abs_max / qmax
             zeros = torch.tensor(0.0)
         else:
             scales = (max_val - min_val).clamp(min=1e-5) / (qmax - qmin)
