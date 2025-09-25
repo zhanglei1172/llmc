@@ -1044,6 +1044,8 @@ class FakeQuantLinear(nn.Module):
         self.dynamic_quant_tmp_weight = False
 
     def forward(self, x):
+        if x.numel() == 0:
+            return x
         if hasattr(self, 'buf_rotate') and self.buf_rotate:
             x = self.rotater.rotate(x)
 
@@ -1142,6 +1144,8 @@ class RotateFakeQuantLinear(RotateLinear2, FakeQuantLinear):
         self.dynamic_quant_tmp_weight = False
 
     def forward(self, x):
+        if x.numel() == 0:
+            return x
         if hasattr(self, "a_rot"):
             x = self.a_rot(x, self)
 
@@ -1231,6 +1235,8 @@ class RotateFakeQuantConv3d(RotateFakeQuantLinear):
             f"Unsupported padding mode: {self.padding_mode}. Only 'zeros' is supported."
     
     def forward(self, x):
+        if x.numel() == 0:
+            return x
         if hasattr(self, "a_rot"):
             x = self.a_rot(x, self)
 
@@ -1327,6 +1333,8 @@ class EffcientFakeQuantLinear(nn.Module):
 
     @torch.no_grad()
     def forward(self, x):
+        if x.numel() == 0:
+            return x
         if hasattr(self, 'buf_rotate') and self.buf_rotate:
             x = self.rotater.rotate(x)
 
@@ -1428,6 +1436,8 @@ class StatFakeQuantLinear(nn.Module):
 
     @torch.no_grad()
     def forward(self, x):
+        if x.numel() == 0:
+            return x
         if hasattr(self, 'buf_rotate') and self.buf_rotate:
             x = self.rotater.rotate(x)
         if self.graph_stat_step[0] == 0:

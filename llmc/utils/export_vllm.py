@@ -8,15 +8,17 @@ def update_vllm_quant_config(
     vllm_quant_method='compressed-tensors',
 
 ):
-    need_pack = config.quant.weight.get('need_pack', False)
-    weight_quant_type = config.quant.weight.get('quant_type', 'int-quant')
-    if 'act' in config.quant:
-        act_quant_type = config.quant.act.get('quant_type', 'int-quant')
+    modaility = config.quant.get("modaility", "language")
+    _quant_config = config.quant[modaility] if modaility in config.quant else config.quant
+    need_pack = _quant_config.weight.get('need_pack', False)
+    weight_quant_type = _quant_config.weight.get('quant_type', 'int-quant')
+    if 'act' in _quant_config:
+        act_quant_type = _quant_config.act.get('quant_type', 'int-quant')
         assert act_quant_type == weight_quant_type
     else:
         act_quant_type = None
     if act_quant_type is not None and act_quant_type == 'float-quant':
-        if config.quant.act.get('static', False):
+        if _quant_config.act.get('static', False):
             quant_config = {
                 'activation_scheme': 'static',
                 'ignored_layers': [
@@ -31,14 +33,14 @@ def update_vllm_quant_config(
             with open(config_file, 'w') as file:
                 json.dump(config_vllm, file, indent=4)
             return
-        elif config.quant.weight.get('granularity', 'per_block'):
+        elif _quant_config.weight.get('granularity', 'per_block'):
             quant_config = {
                 'activation_scheme': 'dynamic',
                 'fmt': 'e4m3',
                 'quant_method': 'fp8',
                 'weight_block_size': [
-                    config.quant.weight.block_size,
-                    config.quant.weight.block_size
+                    _quant_config.weight.block_size,
+                    _quant_config.weight.block_size
                 ]
             }
             config_file = save_quant_path + '/config.json'
@@ -56,7 +58,7 @@ def update_vllm_quant_config(
     elif need_pack:
         vllm_quant_format = 'pack-quantized'
         quant_type = 'int'
-        w_num_bits = config.quant.weight.bit
+        w_num_bits = _quant_config.weight.bit
     elif weight_quant_type == 'float-quant':
         vllm_quant_format = 'float-quantized'
         quant_type = 'float'
@@ -64,17 +66,17 @@ def update_vllm_quant_config(
     else:
         vllm_quant_format = 'int-quantized'
         quant_type = 'int'
-        w_num_bits = config.quant.weight.bit
-        if 'act' in config.quant:
-            a_num_bits = config.quant.act.bit
+        w_num_bits = _quant_config.weight.bit
+        if 'act' in _quant_config:
+            a_num_bits = _quant_config.act.bit
 
-    if config.quant.weight.granularity == 'per_group':
-        group_size = config.quant.weight.group_size
+    if _quant_config.weight.granularity == 'per_group':
+        group_size = _quant_config.weight.group_size
     else:
         group_size = None
 
-    if 'act' in config.quant and 'static' in config.quant.act:
-        dynamic = not config.quant.act.static
+    if 'act' in _quant_config and 'static' in _quant_config.act:
+        dynamic = not _quant_config.act.static
     else:
         dynamic = True
 
@@ -89,11 +91,11 @@ def update_vllm_quant_config(
                     'observer': 'minmax',
                     'observer_kwargs': {},
                     'strategy': 'token'
-                                if config.quant.act.granularity == 'per_token'
+                                if _quant_config.act.granularity == 'per_token'
                                 else 'tensor',
-                    'symmetric': config.quant.act.symmetric,
+                    'symmetric': _quant_config.act.symmetric,
                     'type': quant_type
-                } if 'act' in config.quant else None,
+                } if 'act' in _quant_config else None,
                 'weights': {
                     'dynamic': False,
                     'group_size': group_size,
@@ -102,10 +104,10 @@ def update_vllm_quant_config(
                     'observer_kwargs': {},
                     'strategy': (
                         'group'
-                        if config.quant.weight.granularity == 'per_group'
+                        if _quant_config.weight.granularity == 'per_group'
                         else 'channel'
                     ),
-                    'symmetric': config.quant.weight.symmetric,
+                    'symmetric': _quant_config.weight.symmetric,
                     'type': quant_type,
                 },
             }

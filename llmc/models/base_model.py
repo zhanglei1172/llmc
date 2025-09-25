@@ -56,7 +56,7 @@ class BaseModel(metaclass=ABCMeta):
             self.model.eval()
         except: # noqa
             pass
-        self.update_key_info()
+        # self.update_key_info()
         if self.mm_model:
             self.mm_model.eval()
 

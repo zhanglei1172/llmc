@@ -7,6 +7,8 @@ import re
 from collections import defaultdict
 from functools import partial
 
+import glob
+import shutil
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -1251,3 +1253,5 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.copy_tokenizer(path)
             copy_files(self.config.model.path, path, 'preprocessor_config')
             copy_files(self.config.model.path, path, 'chat_template')
+            for filename in glob.glob(os.path.join(self.config.model.path, '*.py')):
+                shutil.copy(filename, path)

@@ -29,6 +29,7 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from accelerate.utils import DistributedDataParallelKwargs
 from accelerate import Accelerator
+from ..constant import USE_COMPILE
 
 import os
 import nni
@@ -159,7 +160,7 @@ class MyTrainer(Trainer):
             nni.report_intermediate_result(loss.item())
         return loss
 
-    @torch.compile(fullgraph=False)
+    @torch.compile(fullgraph=False, disable=not USE_COMPILE)
     def compute_loss(self, model, inputs, **kwargs):
         args = self.args
         loss_type = args.special.get("loss_type", "origin")
