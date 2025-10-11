@@ -40,7 +40,7 @@ quant:
         granularity: per_tensor
         qmax_to_tensor: True
         ste: True
-        # quant_attn: True
+        quant_attn: True
     mix_bits:
         setting_0:
             layer_name: [down_proj]
