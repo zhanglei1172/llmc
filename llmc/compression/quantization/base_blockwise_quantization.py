@@ -404,7 +404,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def set_model_config(self):
         self.hidden_size = self.model.model_config.hidden_size
         self.num_heads = self.model.model_config.num_attention_heads
-        self.head_dim = self.hidden_size // self.num_heads
+        self.head_dim = getattr(self.model.model_config, "head_dim", self.hidden_size // self.num_heads)
         if hasattr(self.model.model_config, 'intermediate_size'):
             self.intermediate_size = self.model.model_config.intermediate_size
         if hasattr(self.model.model_config, 'num_key_value_heads'):
@@ -1247,6 +1247,19 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.model.avlm_model.save_pretrained(path)
             logger.info('save model done --')
             self.copy_tokenizer(path)
+        elif self.config.model.type in ['Qwen3OmniMoe']:
+            self.model.vlm_model.thinker = self.model.model
+            self.model.vlm_model.thinker.audio_tower = self.model.audio_model
+            self.model.vlm_model.thinker.visual = self.model.vision_model
+            self.model.vlm_model.thinker.visual.patch_embed = self.model.vision_embed
+            self.model.vlm_model.thinker.visual.merger = self.model.vision_projector
+            self.model.vlm_model.save_pretrained(path)
+            logger.info('save model done --')
+            self.copy_tokenizer(path)
+            copy_files(self.config.model.path, path, 'preprocessor_config')
+            copy_files(self.config.model.path, path, 'chat_template')
+            for filename in glob.glob(os.path.join(self.config.model.path, '*.py')):
+                shutil.copy(filename, path)
         else:
             self.model.get_model().save_pretrained(path)
             logger.info('save model done --')

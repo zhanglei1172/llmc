@@ -1,0 +1,150 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen25VL_V4
+    path: /dataset/v5_2_model/v5_2_model_release/checkpoint-14160/
+    tokenizer_mode: slow
+    torch_dtype: torch.bfloat16
+eval:
+    - 
+        eval_pos: [transformed, fake_quant]
+        name: wikitext2
+        type: ppl
+        download: False
+        path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+        seq_len: 2048
+        bs: 1
+        inference_per_block: False
+    # - 
+    #     eval_pos: [transformed, fake_quant]
+    #     type: vqa
+    #     name: [mmmu]
+    #     download: False
+    #     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+    #     bs: 1
+    #     limit: 200  # Limit test num for evaluation
+    #     inference_per_block: False
+quant:
+    method: OSTQuant
+    weight:
+        bit: 8
+        symmetric: True
+        granularity: per_channel
+        group_size: -1
+        calib_algo: 
+        ste: True
+        # minmax_fix: True
+    act:
+        bit: 8
+        symmetric: True
+        granularity: per_tensor
+        qmax_to_tensor: True
+        ste: True
+        # quant_attn: True
+    mix_bits:
+        setting_0:
+            layer_name: [down_proj]
+            do_quant: True
+            weight:
+                bit: 8
+                symmetric: True
+                granularity: per_channel
+                ste: True
+                # minmax_fix: True
+            act:
+                bit: 16
+                symmetric: True
+                granularity: per_tensor
+                ste: True
+    special:
+        rotate_mode: klt
+        fp32_had: True
+        online_rotate: False
+        mixed_precision:
+        # selected_layers: ["S_norm_qkv", "S_norm_upgate", "S_qk", "S_ov"]
+        # selected_layers: ["S_qk", "S_ov"]
+# ignored_layers:
+#     block_ids: [0-28]
+#     layer_names: ["mlp.down_proj"]
+train:
+    data:
+        -
+            name: wikitext2
+            download: False
+            path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+            n_samples: 1300
+            bs: 1
+            seq_len: 2048
+            preproc: wikitext2_gptq
+            seed: *seed
+            cache_dir: 
+        -
+            name: custom_mm
+            download: False
+            path: /dataset/workspace/zhangl98/dataset/deita-6k-v0_llmc/
+            apply_chat_template: True
+            add_answer: True
+            n_samples: 1300
+            bs: 1
+            seq_len: 2048
+            padding: True
+            seed: *seed
+        # - 
+        #     name: custom_msg
+        #     download: False
+        #     path: ./xq_eval/results/combined_data.json
+        #     n_samples: 1300
+        #     bs: 1
+        #     seq_len: 2048
+        #     seed: *seed
+        #     padding: True
+        #     apply_chat_template: True
+        #     cache_dir: 
+    train_args:
+        warmup_steps: 30
+        dataloader_drop_last: True
+        accelerator_config:
+            dispatch_batches: True
+        special:
+            loss_type: kl_top # kl_top origin
+            opt_type: RAdam
+            rotate_lr: 0.1361639079805877
+            rotate_momentum: 0.0
+            smooth_lr: 0.009812197369305694
+            smooth_momentum: 0.9
+            # teacher_path: 
+        # num_train_epochs: 1
+        max_steps: 300
+        save_strategy: 'no'
+        seed: *seed
+        fp16: False
+        # bf16: True
+        bf16: False
+        log_on_each_node: False
+        per_device_train_batch_size: 1
+        gradient_accumulation_steps: 4
+        logging_steps: 1
+        learning_rate: 1.
+        weight_decay: 0.
+        lr_scheduler_type: "cosine"
+        gradient_checkpointing: True
+        output_dir: ./out/
+        logging_dir: ./log/
+        logging_first_step: True
+        report_to: 
+        fsdp: "full_shard auto_wrap"
+        # fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer"
+        fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer,TeacherModel"
+        ddp_find_unused_parameters: True
+        fsdp_config:
+            # activation_checkpointing: True
+            use_orig_params: True
+        # eval_strategy: "steps"
+        # load_best_model_at_end: True
+        # save_total_limit: 1
+save:
+    # Save the Spinquant-transformed model.
+    # save_rotate_weight: True
+    save_trans: True
+    save_fake: True
+    save_path: /dataset/workspace/zhangl98/v5-1010/w8a8/ostq_mask_noQKV

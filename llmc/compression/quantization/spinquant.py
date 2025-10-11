@@ -25,7 +25,7 @@ from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
                            RotateEmbedding, RotateLinear2, _ROTATE_LINEAR_MAP_,
                            _REALQUANT_LINEAR_MAP_, get_module_name)
 from .rotate_utils import ActRotater, RotateModule, WeightRotater
-
+from . import constant
 
 @ALGO_REGISTRY
 class SpinQuant(BaseBlockwiseQuantization):
@@ -592,7 +592,10 @@ class SpinQuant(BaseBlockwiseQuantization):
             _backup = self.config.model.path
             if train_args.special.get("teacher_path"):
                 self.config.model.path = train_args.special.get("teacher_path")
+            # old_ = constant.ATTN_IMPL
+            # constant.set_attn_impl("flash_attention_2")
             teacher_model = MODEL_REGISTRY[self.config.model.type](self.config).model
+            # constant.set_attn_impl(old_)
             self.config.model.path = _backup
             teacher_model.eval()
             for param in teacher_model.parameters():
@@ -613,8 +616,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             train_dataset=train_data,
             eval_dataset=None,
             # data_collator=default_data_collator,
-            # data_collator=patch.CustomDataCollatorForCompletionOnlyLM("<|im_start|>assistant\n", tokenizer=train_tokenizer, pad_to_multiple_of=8),
-            data_collator=patch.CustomDataCollatorForCompletionOnlyLM([-1], tokenizer=train_tokenizer, pad_to_multiple_of=8),
+            data_collator=patch.CustomDataCollatorForCompletionOnlyLM("<|im_start|>assistant\n", tokenizer=train_tokenizer, pad_to_multiple_of=8),
+            # data_collator=patch.CustomDataCollatorForCompletionOnlyLM([-1], tokenizer=train_tokenizer, pad_to_multiple_of=8),
             # optimizers=(optimizer, None),
             # optimizers=(None, None),
             # ignored_modules=ignored_modules,

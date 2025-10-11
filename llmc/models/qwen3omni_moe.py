@@ -13,6 +13,7 @@ else:
 from loguru import logger
 from .base_model import BaseModel
 from llmc.compression.quantization.constant import ATTN_IMPL
+from llmc.compression.quantization.module_utils import _REALQUANT_LINEAR_MAP_
 
 @MODEL_REGISTRY
 class Qwen3OmniMoe(BaseModel):
@@ -130,7 +131,14 @@ class Qwen3OmniMoe(BaseModel):
             return [self.embed_tokens, self.modality_model.norm, self.model.lm_head]
 
     def skip_layer_name(self):
-        return ['lm_head']
+        ret = []
+        for name, module in self.vlm_model.named_modules():
+            try:
+                if 'Linear' in module.__class__.__name__ and type(module) not in _REALQUANT_LINEAR_MAP_.values():
+                    ret.append(name)
+            except:
+                pass
+        return ret
 
     def has_bias(self):
         return False
