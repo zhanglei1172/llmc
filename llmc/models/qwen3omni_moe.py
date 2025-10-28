@@ -67,6 +67,7 @@ class Qwen3OmniMoe(BaseModel):
         self.model = self.vlm_model.thinker
         # self.model.model = self.vlm_model.thinker
         self.model_config = self.vlm_model_config.thinker_config.text_config
+        self.audio_config = self.vlm_model_config.thinker_config.audio_config
 
         # self.min_pixels = 256 * 28 * 28
         # self.max_pixels = 1280 * 28 * 28
@@ -94,8 +95,11 @@ class Qwen3OmniMoe(BaseModel):
         self.blocks = self.modality_model.layers
 
     def find_embed_layers(self):
-        self.embed_tokens = self.modality_model.embed_tokens
-        self.rotary_emb = self.modality_model.rotary_emb
+        self.embed_tokens = self.model.model.embed_tokens
+        self.rotary_emb = self.model.model.rotary_emb
+
+    def get_embedding_layer(self):
+        return [self.modality_model.positional_embedding.positional_embedding]
 
     def find_block_name(self):
         self.block_name_prefix = 'model.layers'
@@ -144,12 +148,61 @@ class Qwen3OmniMoe(BaseModel):
         return False
 
     def get_layernorms_in_block(self, block):
-        return {
-            'input_layernorm': block.input_layernorm,
-            'post_attention_layernorm': block.post_attention_layernorm,
-        }
+        try:
+            return {
+                'input_layernorm': block.input_layernorm,
+                'post_attention_layernorm': block.post_attention_layernorm,
+            }
+        except Exception as e:
+            return {
+                'input_layernorm': block.self_attn_layer_norm,
+                'post_attention_layernorm': block.final_layer_norm,
+            }
+
+    def get_prev_decoder_layers(self):
+        return [self.modality_model.conv_out]
 
     def get_subsets_in_block(self, block):
+        if self.modality == 'audio':
+            return [
+                {
+                    'layers': {
+                        'self_attn.q_proj': block.self_attn.q_proj,
+                        'self_attn.k_proj': block.self_attn.k_proj,
+                        'self_attn.v_proj': block.self_attn.v_proj,
+                    },
+                    'prev_op': [block.self_attn_layer_norm],
+                    'input': ['self_attn.q_proj'],
+                    'inspect': block.self_attn,
+                    'has_kwargs': True,
+                },
+                {
+                    'layers': {'self_attn.o_proj': block.self_attn.out_proj},
+                    'prev_op': [block.self_attn.v_proj],
+                    'input': ['self_attn.o_proj'],
+                    'inspect': block.self_attn.out_proj,
+                    'has_kwargs': False,
+                },
+                {
+                    'layers': {
+                        'block.fc1': block.fc1,
+                    },
+                    'prev_op': [block.final_layer_norm],
+                    'input': ['block.fc1'],
+                    'inspect': block,
+                    'has_kwargs': False,
+                    'is_mlp': True,
+                },
+                {
+                    'layers': {'block.fc2': block.fc2},
+                    'prev_op': [block.fc1],
+                    'input': ['block.fc2'],
+                    'inspect': block.fc2,
+                    'has_kwargs': False,
+                    'is_mlp': True,
+                },
+            ]
+
         layers = []
         layers.append(
             {

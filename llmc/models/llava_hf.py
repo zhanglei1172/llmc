@@ -4,8 +4,16 @@ import torch
 from accelerate import Accelerator, DistributedType
 from accelerate.state import AcceleratorState
 from lmms_eval.api.model import lmms
-from lmms_eval.models.llava_hf import LlavaHf as LlavaHF
 from loguru import logger
+try:
+    from lmms_eval.models.llava_hf import LlavaHf as LlavaHF
+except Exception:
+    class LlavaHF:
+        pass
+    logger.warning(
+        'LMMS Eval LlavaHf model not be found. '
+        'If you need it, please install lmms-eval package: pip install lmms-eval'
+    )
 from PIL import Image
 from transformers import (AutoConfig, AutoProcessor,
                           LlavaForConditionalGeneration)

@@ -6,8 +6,13 @@ import torch
 from accelerate import Accelerator, DistributedType, InitProcessGroupKwargs
 from accelerate.state import AcceleratorState
 from lmms_eval.api.model import lmms
-from lmms_eval.models.llava import Llava as LLaVA
 from loguru import logger
+try:
+    from lmms_eval.models.llava import Llava as LLaVA
+except Exception as e:
+    class LLaVA:
+        pass
+    logger.debug('LMMS Eval LLaVA model not be found. If you need it, please install lmms-eval package.\nError: %s' % e)
 from packaging import version
 from transformers import AutoConfig, AutoTokenizer
 

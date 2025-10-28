@@ -38,6 +38,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             self.vision_preprocess()
         elif self.modality == 'language':
             self.preprocess()
+        elif self.modality == 'audio':
+            self.audio_preprocess()
         else:
             raise ValueError(f'Unsupported modality {self.modality}')
 
@@ -58,6 +60,65 @@ class SpinQuant(BaseBlockwiseQuantization):
         vision_projector = self.model.vision_projector
         if vision_projector is not None:
             logger.info('Rotating vision projector layer.')
+            pre_vison_proj_ln = vision_projector.ln_q
+            self.fuse_ln_fcs(pre_vison_proj_ln, [vision_projector.mlp[0]])
+            pre_vison_proj_ln_name = get_module_name(vision_projector, pre_vison_proj_ln)
+            self.model.replace_module_subset(
+                LlmcRMSNorm,
+                self.model.vision_projector,
+                {'layers': {pre_vison_proj_ln_name: pre_vison_proj_ln}},
+                None,
+                {},
+            )
+            vision_up_proj = [self.model.vision_projector.mlp[0]]
+            for layer in vision_up_proj:
+                rot_layer_name = get_module_name(self.model.model, layer)
+                layers_dict[rot_layer_name] = layer
+        if layers_dict:
+            self.model.replace_module_subset(
+                RotateLinear2,
+                self.model.model,
+                {'layers': layers_dict},
+                None,
+                params_dict
+            )
+
+        # Rotate the vision embed layers
+
+        args = {}
+        args['Q1'] = self.model.modality_model.Q1
+        args['Q2'] = None
+        args['transpose'] = True
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        vision_embed = [self.model.vision_embed.proj]
+        if vision_embed is not None:
+            logger.info('Rotating vision head layers.')
+            for layer in vision_embed:
+                rot_layer_name = get_module_name(self.model.model, layer)
+
+                self.model.replace_module_subset(
+                    _ROTATE_LINEAR_MAP_[type(layer)],
+                    self.model.model,
+                    {'layers': {rot_layer_name: layer}},
+                    None,
+                    params_dict
+                )
+
+    def audio_preprocess(self):
+        for m in self.model.modality_model.parameters():
+            m.requires_grad = False
+        Q1 = self.get_orthogonal_matrix(self.hidden_size)
+        self.model.modality_model.Q1 = RotateModule(Q1)
+        # Rotate the audio projector
+        layers_dict = {}
+        args = {}
+        args['Q1'] = self.model.modality_model.Q1
+        args['Q2'] = None
+        args['transpose'] = False
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        layers = self.model.get_prev_decoder_layers()
+        if layers:
+            logger.info('Rotating audio projector layer.')
             pre_vison_proj_ln = vision_projector.ln_q
             self.fuse_ln_fcs(pre_vison_proj_ln, [vision_projector.mlp[0]])
             pre_vison_proj_ln_name = get_module_name(vision_projector, pre_vison_proj_ln)
@@ -508,6 +569,10 @@ class SpinQuant(BaseBlockwiseQuantization):
                 self.model.replace_vision_module_all(
                     RotateFakeQuantLinear, params_dict
                 )
+            elif self.modality == 'audio':
+                self.model.replace_audio_module_all(
+                    RotateFakeQuantLinear, params_dict
+                )
             else:
                 self.model.replace_module_all(
                     RotateFakeQuantLinear, params_dict
@@ -545,6 +610,7 @@ class SpinQuant(BaseBlockwiseQuantization):
         llmc_model_to_train = copy.deepcopy(self.model)
         llmc_model_to_train.config.calib = self.config.train.data
         # ignored_modules.extend(self.get_ignored_modules(llmc_model_to_train))
+        _use_cache = llmc_model_to_train.model.config.use_cache
         llmc_model_to_train.model.config.use_cache = False
 
         dataset = MixDataset(tokenizer.get_tokenizer(), self.config.train.data, llmc_model_to_train.batch_process, llmc_model_to_train.processor)
@@ -559,6 +625,7 @@ class SpinQuant(BaseBlockwiseQuantization):
             add_bos_token=False,
         )
         if llmc_model_to_train.processor:
+            _tokenizer = llmc_model_to_train.processor.tokenizer
             llmc_model_to_train.processor.tokenizer = train_tokenizer
 
 
@@ -584,6 +651,7 @@ class SpinQuant(BaseBlockwiseQuantization):
 
         train_args = LLMCTrainingArguments(**self.config.train.train_args)
         # trainable_parameters = self.get_trainable_params(llmc_model_to_train)
+        _seqlen = llmc_model_to_train.model.seqlen
         llmc_model_to_train.model.seqlen = model_max_length
         # optimizer = SGDG(trainable_parameters, lr=self.config.train.train_args.learning_rate, stiefel=True)
         # FSDPTrainer._optimizer = optimizer
@@ -637,6 +705,10 @@ class SpinQuant(BaseBlockwiseQuantization):
         if need_teacher:
             del llmc_model_to_train.model.teacher, teacher_model
         
+        if llmc_model_to_train.processor:
+            llmc_model_to_train.processor.tokenizer = _tokenizer
+        llmc_model_to_train.model.seqlen = _seqlen
+        llmc_model_to_train.model.config.use_cache = _use_cache
 
         # self.model.model.to('cpu')
         # self.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')

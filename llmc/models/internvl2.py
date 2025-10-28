@@ -7,8 +7,16 @@ from accelerate import Accelerator, DistributedType
 from accelerate.state import AcceleratorState
 from accelerate.utils import InitProcessGroupKwargs
 from lmms_eval.api.model import lmms
-from lmms_eval.models.internvl2 import InternVL2 as LMMS_InternVL2
 from loguru import logger
+try:
+    from lmms_eval.models.internvl2 import InternVL2 as LMMS_InternVL2
+except Exception:
+    class LMMS_InternVL2:
+        pass
+    logger.warning(
+        'LMMS Eval InternVL2 model not be found. '
+        'If you need it, please install lmms-eval package: pip install lmms-eval'
+    )
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
