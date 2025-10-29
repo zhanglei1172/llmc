@@ -1139,6 +1139,11 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.model.avlm_model.save_pretrained(path)
             logger.info('save model done --')
             self.copy_tokenizer(path)
+        elif self.config.model.type in ['Qwen3Omni']:
+            self.model.omni_model.thinker = self.model.get_model()
+            self.model.omni_model.save_pretrained(path)
+            logger.info('save model done --')
+            self.copy_tokenizer(path)
         else:
             self.model.get_model().save_pretrained(path)
             logger.info('save model done --')
