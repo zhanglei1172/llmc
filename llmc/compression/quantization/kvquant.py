@@ -199,8 +199,8 @@ class NaiveQuantKVCache(DynamicCache):
     def _reset_states(self):
         self._quantized_key_cache = []
         self._quantized_value_cache = []
-        self.key_cache.layers.clear()
-        self.value_cache.layers.clear()
+        self.key_cache = []
+        self.value_cache = []
         self._seen_tokens = 0
 
     def get_qparams(self, tensor):
