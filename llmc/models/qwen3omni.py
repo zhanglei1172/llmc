@@ -39,9 +39,9 @@ class Qwen3Omni(Qwen3Moe):
         logger.info(f'self.omni_model : {self.omni_model}')
 
         self.vision_model = self.omni_model.thinker.visual
-        self.vision_projector = self.vision_model.merger
-        self.vision_embed = self.vision_model.patch_embed
+        self.vision_embed = [[self.vision_model.patch_embed.proj], [self.vision_model.pos_embed]]
         self.vision_config = self.omni_model_config.thinker_config.vision_config
+        self.vision_projector = [self.vision_model.merger] + [self.vision_model.merger_list[i] for i in range(len(self.vision_config.deepstack_visual_indexes))]
 
         self.audio_model = self.omni_model.thinker.audio_tower
         self.audio_projector = self.audio_model.proj2
@@ -63,6 +63,16 @@ class Qwen3Omni(Qwen3Moe):
         super().build_tokenizer()
         if self.tokenizer is not None:
             self.tokenizer.padding_side = 'left'
+
+    def get_embed_layers(self):
+        if self.get_modality() == 'language':
+            return super().get_embed_layers()
+        elif self.get_modality() == 'vision':
+            return self.vision_embed
+        elif self.get_modality() == 'audio':
+            return self.audio_embed
+        else:
+            raise Exception(f'{self.get_modality()} modality not supported!')
 
     def find_blocks(self):
         if self.get_modality() == 'language':

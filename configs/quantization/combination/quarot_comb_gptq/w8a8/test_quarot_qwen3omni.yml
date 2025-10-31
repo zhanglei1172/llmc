@@ -24,7 +24,7 @@ eval:
     inference_per_block: False
 quant:
     vision:
-        method: Quarot
+        method: QuarotOmni
         weight:
             bit: 8
             symmetric: True

@@ -12,6 +12,7 @@ from .omniq import OmniQuant
 from .osplus import OsPlus
 from .quant import FloatQuantizer, IntegerQuantizer
 from .quarot import Quarot
+from .quarot_omni import QuarotOmni
 from .quik import QUIK
 from .rtn import RTN
 from .smoothquant import SmoothQuant
