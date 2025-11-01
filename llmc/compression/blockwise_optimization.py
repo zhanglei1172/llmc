@@ -35,6 +35,10 @@ class BlockwiseOpt(metaclass=ABCMeta):
                 f'\nblock index: {self.block_idx}/{len(self.blocks)} '
                 f'\nblock: {self.blocks[self.block_idx]}'
             )
+            if os.environ.get('DEBUG') == "1":
+                if i > 0:
+                    logger.info("Debug mode: break after 1 blocks")
+                    break
             self.block_opt(self.blocks[self.block_idx])
 
         if hasattr(self, 'save_scale') and self.save_scale:

@@ -23,6 +23,8 @@ from llmc.utils import (check_config, deploy_all_modality, get_modality,
                         mkdirs, print_important_package_version, seed_all,
                         update_autoawq_quant_config, update_vllm_quant_config)
 from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
+from llmc.utils.utils import patch_module_to_cpu, patch_module_to_cuda
+
 
 import nni
 
@@ -54,38 +56,39 @@ def main(config):
     blockwise_opts = []
     modalities, modality_configs = get_modality(config)
     dist.barrier()
-    for modality, modality_config in zip(modalities, modality_configs):
-        model.set_modality(modality)
-        if not config.get('calib', False):
-            blockwise_opt = ALGO_REGISTRY[modality_config.method](
-                model,
-                modality_config,
-                input=None,
-                padding_mask=None,
-                config=config,
-            )
-            blockwise_opt.run_block_loop()
-            blockwise_opts.append(blockwise_opt)
-            dist.barrier()
-        else:
-            dataset = MixDataset(
-                model.get_tokenizer(), config.calib, model.batch_process, model.processor
-            )
-            calib_data, padding_mask = dataset.get_calib_dataset()
-            model.collect_first_block_input(calib_data, padding_mask)
-            del calib_data
-            gc.collect()
-            torch.cuda.empty_cache()
-            blockwise_opt = ALGO_REGISTRY[modality_config.method](
-                model,
-                modality_config,
-                model.get_first_block_input(),
-                model.get_padding_mask(),
-                config,
-            )
-            blockwise_opt.run_block_loop()
-            blockwise_opts.append(blockwise_opt)
-            dist.barrier()
+    with patch_module_to_cpu(torch.nn.Module), patch_module_to_cuda(torch.nn.Module):
+        for modality, modality_config in zip(modalities, modality_configs):
+            model.set_modality(modality)
+            if not config.get('calib', False):
+                blockwise_opt = ALGO_REGISTRY[modality_config.method](
+                    model,
+                    modality_config,
+                    input=None,
+                    padding_mask=None,
+                    config=config,
+                )
+                blockwise_opt.run_block_loop()
+                blockwise_opts.append(blockwise_opt)
+                dist.barrier()
+            else:
+                dataset = MixDataset(
+                    model.get_tokenizer(), config.calib, model.batch_process, model.processor
+                )
+                calib_data, padding_mask = dataset.get_calib_dataset()
+                model.collect_first_block_input(calib_data, padding_mask)
+                del calib_data
+                gc.collect()
+                torch.cuda.empty_cache()
+                blockwise_opt = ALGO_REGISTRY[modality_config.method](
+                    model,
+                    modality_config,
+                    model.get_first_block_input(),
+                    model.get_padding_mask(),
+                    config,
+                )
+                blockwise_opt.run_block_loop()
+                blockwise_opts.append(blockwise_opt)
+                dist.barrier()
     if 'train' in config:
         if int(os.environ['RANK']) == 0:
             # 假设这个字典是在 rank 0 上动态创建的
@@ -100,10 +103,11 @@ def main(config):
         if "warmup_steps" in RCV_PARAMS:
             config.train.train_args.warmup_steps = RCV_PARAMS['warmup_steps']
             config.train.train_args.max_steps = RCV_PARAMS['max_steps']
-        deploy_all_modality(
-            blockwise_opts,
-            config['train']["train_state"] if config['train'].get("train_state") else blockwise_opts[-1].avaliable_train_state[0]
-        )
+        with patch_module_to_cpu(torch.nn.Module), patch_module_to_cuda(torch.nn.Module):
+            deploy_all_modality(
+                blockwise_opts,
+                config['train']["train_state"] if config['train'].get("train_state") else blockwise_opts[-1].avaliable_train_state[0]
+            )
 
         blockwise_opts[-1].train(tokenizer=tokenizer)
         gc.collect()

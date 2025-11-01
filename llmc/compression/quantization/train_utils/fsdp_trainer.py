@@ -31,12 +31,13 @@ from accelerate.utils import DistributedDataParallelKwargs
 from accelerate import Accelerator
 from ..constant import USE_COMPILE
 
+from llmc.utils.utils import patch_module_to_cuda
 import os
 import nni
 
 
 def pt_fsdp_state_dict(model: torch.nn.Module):
-    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
+    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     with PT_FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
         return model.state_dict()
 
@@ -77,8 +78,9 @@ class FSDPTrainer(Trainer):
         )
         if hasattr(self.accelerator.state, 'fsdp_plugin') and self.accelerator.state.fsdp_plugin is not None:
             # Do not wrap rotation matrix
-            for ignored_module in ignored_modules:
-                ignored_module.to(torch.cuda.current_device())
+            with patch_module_to_cuda(nn.Module):
+                for ignored_module in ignored_modules:
+                    ignored_module.cuda()
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             # self.accelerator.state.fsdp_plugin.fsdp_version = 2
             # self.accelerator.state.fsdp_plugin.reshard_after_forward = True
@@ -144,10 +146,12 @@ class MyTrainer(Trainer):
         ):
             model: nn.Module = self.model
             ignored_modules = list()
-            for m in model.modules():
-                if isinstance(m, (RotateModule, SmoothModule)):
-                    ignored_modules.append(m)
-                    m.to(torch.cuda.current_device())
+            with patch_module_to_cuda(nn.Module):
+                for m in model.modules():
+                    if isinstance(m, (RotateModule, SmoothModule)):
+                        ignored_modules.append(m)
+                        # m.to(torch.cuda.current_device())
+                        m.cuda()
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             self.accelerator.state.fsdp_plugin.use_orig_params = True
 

@@ -5,7 +5,7 @@ from PIL import Image
 import os
 import random
 import shutil
-
+import contextlib
 import numpy as np
 import torch
 from loguru import logger
@@ -158,3 +158,157 @@ def resize_image(input_base64, width, height, keep_aspect_ratio=True):
     except Exception as e:
         print(f"处理图片时出现错误: {e}")
         return None
+
+import copy
+
+
+def get_non_persistent_buffers(module: torch.nn.Module, recurse: bool = False, fqns: bool = False):
+    """
+    Gather all non persistent buffers of a given modules into a set
+
+    Args:
+        module (`nn.Module`):
+            The module we want the non persistent buffers on.
+        recurse (`bool`, *optional*, defaults to `False`):
+            Whether or not to go look in every submodule or just return the direct non persistent buffers.
+        fqns (`bool`, *optional*, defaults to `False`):
+            Whether or not to return the fully-qualified names of the non persistent buffers.
+    """
+
+    non_persistent_buffers_set = module._non_persistent_buffers_set
+    if recurse:
+        for n, m in module.named_modules():
+            if fqns:
+                non_persistent_buffers_set |= {n + "." + b for b in m._non_persistent_buffers_set}
+            else:
+                non_persistent_buffers_set |= m._non_persistent_buffers_set
+
+    return non_persistent_buffers_set
+
+@contextlib.contextmanager
+def patch_module_to_cpu(base: object):
+    """
+    Patch the value of an object attribute. Original value is restored upon exit
+
+    :param base: object which has the attribute to patch
+    :param attr: name of the the attribute to patch
+    :param value: used to replace original value
+
+    Usage:
+    >>> from types import SimpleNamespace
+    >>> obj = SimpleNamespace()
+    >>> with patch_attr(obj, "attribute", "value"):
+    ...     assert obj.attribute == "value"
+    >>> assert not hasattr(obj, "attribute")
+    """
+    # rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    attr = "cpu"
+    _sentinel = object()
+    original_value = getattr(base, attr, _sentinel)
+
+    setattr(base, attr, module_to_cpu)
+    try:
+        yield
+    finally:
+        if original_value is not _sentinel:
+            setattr(base, attr, original_value)
+        else:
+            delattr(base, attr)
+
+@contextlib.contextmanager
+def patch_module_to_cuda(base: object):
+    """
+    Patch the value of an object attribute. Original value is restored upon exit
+
+    :param base: object which has the attribute to patch
+    :param attr: name of the the attribute to patch
+    :param value: used to replace original value
+
+    Usage:
+    >>> from types import SimpleNamespace
+    >>> obj = SimpleNamespace()
+    >>> with patch_attr(obj, "attribute", "value"):
+    ...     assert obj.attribute == "value"
+    >>> assert not hasattr(obj, "attribute")
+    """
+    # rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    attr = "cuda"
+    _sentinel = object()
+    original_value = getattr(base, attr, _sentinel)
+
+    # setattr(base, attr, module_to_cuda.__get__(base))
+    setattr(base, attr, module_to_cuda)
+    try:
+        yield
+    finally:
+        if original_value is not _sentinel:
+            setattr(base, attr, original_value)
+        else:
+            delattr(base, attr)
+
+
+def module_to_cuda(self: torch.nn.Module):
+    """
+    Move a module to CUDA
+    :param module: module to move
+    """
+    if not isinstance(self, torch.nn.Module):
+        return self.to('cuda')
+    src_rank = 0
+    device = "cuda"
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+
+    non_persistent_buffer_fqns = get_non_persistent_buffers(self, recurse=True, fqns=True)
+
+    
+    _sd = {}
+    meta_sd = self.state_dict()
+
+    for name, sd_param in meta_sd.items():
+        if rank == src_rank:
+            send_tensor = sd_param.to(device)
+            torch.distributed.broadcast(send_tensor, src=src_rank)
+            _sd[name] = send_tensor
+        else:
+            recv_tensor = torch.empty_like(sd_param, device=device)
+            torch.distributed.broadcast(recv_tensor, src=src_rank)
+            _sd[name] = recv_tensor
+    self.load_state_dict(_sd, assign=True)
+        
+    del _sd
+    
+    original_non_persistent_buffers = copy.deepcopy(
+        {k: v for k, v in self.named_buffers() if k in non_persistent_buffer_fqns}
+    )
+    
+    for fqn, buffer_tensor in original_non_persistent_buffers.items():
+        if rank == src_rank:
+            buffer_tensor = buffer_tensor.to(device)
+        else:
+            buffer_tensor = torch.empty_like(buffer_tensor, device=device)
+
+        if "." in fqn:
+            parent_fqn, local_buffer_name = fqn.rsplit(".", 1)
+            parent_module = self.get_submodule(parent_fqn)
+        else:
+            local_buffer_name = fqn
+            parent_module = self
+
+        parent_module.register_buffer(local_buffer_name, buffer_tensor, persistent=False)
+
+    return self
+
+
+def module_to_cpu(self: torch.nn.Module):
+    """
+    Move a module to CPU
+
+    :param module: module to move
+    """
+    if not isinstance(self, torch.nn.Module):
+        return self.to('cpu')
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    if rank == 0:
+        return self.to('cpu')
+    else:
+        return self.to('meta')

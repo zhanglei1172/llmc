@@ -45,14 +45,26 @@ class Qwen25VL_V4(Qwen25VL):
             if hasattr(self.vlm_model_config, "use_cache"):
                 self.vlm_model_config.use_cache = False
         logger.info(f"self.vlm_model_config : {self.vlm_model_config}")
-        self.vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.model_path,
-            config=self.vlm_model_config,
-            trust_remote_code=True,
-            torch_dtype=self.torch_dtype,
-            low_cpu_mem_usage=True,
-            attn_implementation=ATTN_IMPL, # TODO for quant_attn
-        )
+        from accelerate import infer_auto_device_map, init_empty_weights
+        import torch
+        if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+            with init_empty_weights():
+                self.vlm_model = Qwen2_5_VLForConditionalGeneration._from_config(
+                    self.vlm_model_config,
+                    # trust_remote_code=True,
+                    torch_dtype=self.torch_dtype,
+                    # low_cpu_mem_usage=True,
+                    attn_implementation=ATTN_IMPL,
+                )
+        else:
+            self.vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                self.model_path,
+                config=self.vlm_model_config,
+                trust_remote_code=True,
+                torch_dtype=self.torch_dtype,
+                low_cpu_mem_usage=True,
+                attn_implementation=ATTN_IMPL, # TODO for quant_attn
+            )
 
         class ExpandVocabLinear(nn.Module):
             def __init__(self, ori_module):

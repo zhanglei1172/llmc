@@ -40,7 +40,7 @@ quant:
         granularity: per_tensor
         qmax_to_tensor: True
         ste: True
-        quant_attn: True
+        # quant_attn: True
     mix_bits:
         setting_0:
             layer_name: [down_proj]
@@ -57,7 +57,7 @@ quant:
                 granularity: per_tensor
                 ste: True
     special:
-        rotate_mode: klt
+        rotate_mode: hadamard
         fp32_had: True
         online_rotate: False
         mixed_precision:
@@ -101,7 +101,7 @@ train:
         #     apply_chat_template: True
         #     cache_dir: 
     train_args:
-        warmup_steps: 30
+        warmup_steps: 0
         dataloader_drop_last: True
         accelerator_config:
             dispatch_batches: True
@@ -114,7 +114,7 @@ train:
             smooth_momentum: 0.9
             # teacher_path: 
         # num_train_epochs: 1
-        max_steps: 300
+        max_steps: 150
         save_strategy: 'no'
         seed: *seed
         fp16: False
@@ -139,12 +139,14 @@ train:
         fsdp_config:
             # activation_checkpointing: True
             use_orig_params: True
+            sync_module_states: True
+            cpu_ram_efficient_loading: True
         # eval_strategy: "steps"
         # load_best_model_at_end: True
         # save_total_limit: 1
-save:
-    # Save the Spinquant-transformed model.
-    # save_rotate_weight: True
-    save_trans: True
-    save_fake: True
-    save_path: /dataset/workspace/zhangl98/v5-1010/w8a8/ostq_mask_noQKV
+# save:
+#     # Save the Spinquant-transformed model.
+#     # save_rotate_weight: True
+#     save_trans: True
+#     save_fake: True
+#     save_path: /dataset/workspace/zhangl98/v5-1010/w8a8/ostq_mask_noQKV

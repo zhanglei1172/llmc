@@ -34,14 +34,26 @@ class Qwen3OmniMoe(BaseModel):
         if latest_transformers:
             from transformers import Qwen3OmniMoeForConditionalGeneration
             from transformers import Qwen3OmniMoeProcessor
-            self.vlm_model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
-                self.model_path,
-                config=self.vlm_model_config,
-                trust_remote_code=True,
-                torch_dtype=self.torch_dtype,
-                low_cpu_mem_usage=True,
-                attn_implementation=ATTN_IMPL,
-            )
+            from accelerate import infer_auto_device_map, init_empty_weights
+            import torch
+            if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+                with init_empty_weights():
+                    self.vlm_model = Qwen3OmniMoeForConditionalGeneration._from_config(
+                        self.vlm_model_config,
+                        # trust_remote_code=True,
+                        torch_dtype=self.torch_dtype,
+                        # low_cpu_mem_usage=True,
+                        attn_implementation=ATTN_IMPL,
+                    )
+            else:
+                self.vlm_model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
+                    self.model_path,
+                    config=self.vlm_model_config,
+                    trust_remote_code=True,
+                    torch_dtype=self.torch_dtype,
+                    low_cpu_mem_usage=True,
+                    attn_implementation=ATTN_IMPL,
+                )
             self.processor = Qwen3OmniMoeProcessor.from_pretrained(self.model_path)
         else:
             self.vlm_model = AutoModelForCausalLM.from_pretrained(
@@ -90,6 +102,9 @@ class Qwen3OmniMoe(BaseModel):
         else:
             self.modality_model = self.model.model
         self.update_key_info()
+
+    def get_extra_rot_module_besides_embed_layers(self):
+        return [self.model.audio_tower.proj2, self.model.visual.merger.mlp[-1]] + [self.model.visual.merger_list[i].mlp[-1] for i in range(len(self.vision_config.deepstack_visual_indexes))]
 
     def find_blocks(self):
         self.blocks = self.modality_model.layers

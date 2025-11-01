@@ -1,31 +1,41 @@
 import copy
 import gc
+import json
 import os
 from functools import partial
-import json
 
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers import (default_data_collator, AutoTokenizer)
+from transformers import AutoTokenizer, default_data_collator
 
-from llmc.utils.registry_factory import ALGO_REGISTRY
-from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
-from llmc.utils.registry_factory import MODEL_REGISTRY
+from llmc.data import BaseTokenizer, MixDataset, TrainJsonDataset
+from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
 
-from .train_utils.fsdp_trainer import MyTrainer
-from .train_utils.train_utils import LLMCTrainingArguments
+from . import constant
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import *
-from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
-                           EffcientFakeQuantLinear, FakeQuantLinear, RotateFakeQuantLinear,
-                           LlmcRMSNorm, OriginEmbedding, OriginFloatLinear,
-                           OriginFloatConv3d,
-                           RotateEmbedding, RotateLinear2, _ROTATE_LINEAR_MAP_,
-                           _REALQUANT_LINEAR_MAP_, get_module_name)
+from .module_utils import (
+    _LLMC_LN_TYPES_,
+    _REALQUANT_LINEAR_MAP_,
+    _ROTATE_LINEAR_MAP_,
+    _TRANSFORMERS_LN_TYPES_,
+    EffcientFakeQuantLinear,
+    FakeQuantLinear,
+    LlmcRMSNorm,
+    OriginEmbedding,
+    OriginFloatConv3d,
+    OriginFloatLinear,
+    RotateEmbedding,
+    RotateFakeQuantLinear,
+    RotateLinear2,
+    get_module_name,
+)
 from .rotate_utils import ActRotater, RotateModule, WeightRotater
-from . import constant
+from .train_utils.fsdp_trainer import MyTrainer
+from .train_utils.train_utils import LLMCTrainingArguments
+
 
 @ALGO_REGISTRY
 class SpinQuant(BaseBlockwiseQuantization):
@@ -539,7 +549,7 @@ class SpinQuant(BaseBlockwiseQuantization):
                     None,
                     {}
                 )
-                del self._vision_rotate_layers
+            del self._vision_rotate_layers
 
 
     def deploy(self, quant_format, keep_device=False):
@@ -607,10 +617,21 @@ class SpinQuant(BaseBlockwiseQuantization):
 
     def train(self, tokenizer=None):
         # ignored_modules = []
+        change_records = []
+        for _, module in self.model.model.named_modules():
+            # register_buffer as persistent to avoid issues in load_state_dict
+            change_name_list = list(module._non_persistent_buffers_set)
+            for buffer_name in change_name_list:
+                module._non_persistent_buffers_set.discard(buffer_name)
+                change_records.append((module, buffer_name))
+        state_dict = self.model.model.state_dict()
+        self.model.model.to("meta")
         llmc_model_to_train = copy.deepcopy(self.model)
+        if int(os.environ['RANK']) == 0:
+            llmc_model_to_train.model.load_state_dict(state_dict, assign=True)
+        del state_dict
         llmc_model_to_train.config.calib = self.config.train.data
         # ignored_modules.extend(self.get_ignored_modules(llmc_model_to_train))
-        _use_cache = llmc_model_to_train.model.config.use_cache
         llmc_model_to_train.model.config.use_cache = False
 
         dataset = MixDataset(tokenizer.get_tokenizer(), self.config.train.data, llmc_model_to_train.batch_process, llmc_model_to_train.processor)
@@ -625,7 +646,6 @@ class SpinQuant(BaseBlockwiseQuantization):
             add_bos_token=False,
         )
         if llmc_model_to_train.processor:
-            _tokenizer = llmc_model_to_train.processor.tokenizer
             llmc_model_to_train.processor.tokenizer = train_tokenizer
 
 
@@ -651,7 +671,6 @@ class SpinQuant(BaseBlockwiseQuantization):
 
         train_args = LLMCTrainingArguments(**self.config.train.train_args)
         # trainable_parameters = self.get_trainable_params(llmc_model_to_train)
-        _seqlen = llmc_model_to_train.model.seqlen
         llmc_model_to_train.model.seqlen = model_max_length
         # optimizer = SGDG(trainable_parameters, lr=self.config.train.train_args.learning_rate, stiefel=True)
         # FSDPTrainer._optimizer = optimizer
@@ -672,8 +691,9 @@ class SpinQuant(BaseBlockwiseQuantization):
             llmc_model_to_train.model.teacher = TeacherModel(teacher_model)
         # from trl.trainer.utils import DataCollatorForCompletionOnlyLM
         # from accelerate.utils import operations
-        from llmc.utils import patch
         from types import MethodType
+
+        from llmc.utils import patch
         # _concatenate = operations.concatenate
         # operations.concatenate = patch.concatenate
         train_tokenizer.pad = MethodType(patch.pad, train_tokenizer)
@@ -705,16 +725,16 @@ class SpinQuant(BaseBlockwiseQuantization):
         if need_teacher:
             del llmc_model_to_train.model.teacher, teacher_model
         
-        if llmc_model_to_train.processor:
-            llmc_model_to_train.processor.tokenizer = _tokenizer
-        llmc_model_to_train.model.seqlen = _seqlen
-        llmc_model_to_train.model.config.use_cache = _use_cache
 
         # self.model.model.to('cpu')
         # self.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
         state_dict = trainer.get_trained_params()
-        model_state = self.model.model.state_dict()
-        for name, param in model_state.items():
-            if name in state_dict:
-                # 保持原 device，只拷贝数据
-                param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
+        # model_state = self.model.model.state_dict()
+        if int(os.environ['RANK']) == 0:
+            self.model.model.load_state_dict(state_dict, assign=True)
+        for module, buffer_name in change_records:
+            module._non_persistent_buffers_set.add(buffer_name)
+            # for name, param in model_state.items():
+            #     if name in state_dict:
+            #         # 保持原 device，只拷贝数据
+            #         param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
