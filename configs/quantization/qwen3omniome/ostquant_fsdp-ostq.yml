@@ -35,13 +35,13 @@ quant:
         calib_algo: 
         ste: True
         minmax_fix: False
-    act:
-        bit: 8
-        symmetric: True
-        granularity: per_tensor
-        qmax_to_tensor: True
-        ste: True
-        # quant_attn: True
+    # act:
+    #     bit: 8
+    #     symmetric: True
+    #     granularity: per_tensor
+    #     qmax_to_tensor: True
+    #     ste: True
+    #     # quant_attn: True
     mix_bits:
         setting_0:
             layer_name: [down_proj]
@@ -51,17 +51,18 @@ quant:
                 symmetric: True
                 granularity: per_channel
                 ste: True
-            act:
-                bit: 16
-                symmetric: True
-                granularity: per_tensor
-                ste: True
+            # act:
+            #     bit: 16
+            #     symmetric: True
+            #     granularity: per_tensor
+            #     ste: True
     special:
         rotate_mode: hadamard #klt
         fp32_had: True
         online_rotate: False
         mixed_precision:
-        selected_layers: ["S_qk", "S_ov"]
+        selected_layers: []
+        # selected_layers: []
 # ignored_layers:
 #     block_ids: [0-28]
 #     layer_names: ["mlp.down_proj"]
@@ -123,7 +124,7 @@ train:
         per_device_train_batch_size: 2
         gradient_accumulation_steps: 1
         logging_steps: 1
-        learning_rate: 1.
+        learning_rate: 0.1361639079805877
         weight_decay: 0.
         lr_scheduler_type: "cosine"
         gradient_checkpointing: True
@@ -132,18 +133,21 @@ train:
         logging_first_step: True
         report_to: 
         fsdp: "full_shard auto_wrap"
-        # fsdp_transformer_layer_cls_to_wrap: "Qwen2_5_VLDecoderLayer"
-        fsdp_transformer_layer_cls_to_wrap: "Qwen3_VL_MoeDecoderLayer,TeacherModel"
+        # fsdp_transformer_layer_cls_to_wrap: "Qwen3OmniMoeThinkerTextDecoderLayer,TeacherModel"
+        # fsdp_transformer_layer_cls_to_wrap: "Qwen3_VL_MoeDecoderLayer,TeacherModel"
         ddp_find_unused_parameters: True
         fsdp_config:
             # activation_checkpointing: True
+            transformer_layer_cls_to_wrap: "Qwen3OmniMoeThinkerTextDecoderLayer,TeacherModel"
             use_orig_params: True
+            sync_module_states: True
+            cpu_ram_efficient_loading: True
         # eval_strategy: "steps"
         # load_best_model_at_end: True
         # save_total_limit: 1
-# save:
-#     # Save the Spinquant-transformed model.
-#     # save_rotate_weight: True
-#     save_trans: True
-#     save_fake: True
-#     save_path: /dataset/workspace/zhangl98/v5-0905/w4a8/ostq_mix_kl_mp-d_prot-softmax 
+save:
+    # Save the Spinquant-transformed model.
+    # save_rotate_weight: True
+    save_trans: True
+    # save_fake: True
+    save_path: /code/omni_ostq_wa
