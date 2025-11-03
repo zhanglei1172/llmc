@@ -133,12 +133,12 @@ train:
         logging_first_step: True
         report_to: 
         fsdp: "full_shard auto_wrap"
-        # fsdp_transformer_layer_cls_to_wrap: "Qwen3OmniMoeThinkerTextDecoderLayer,TeacherModel"
+        fsdp_transformer_layer_cls_to_wrap: "Qwen3OmniMoeThinkerTextDecoderLayer,TeacherModel"
         # fsdp_transformer_layer_cls_to_wrap: "Qwen3_VL_MoeDecoderLayer,TeacherModel"
         ddp_find_unused_parameters: True
         fsdp_config:
             # activation_checkpointing: True
-            transformer_layer_cls_to_wrap: "Qwen3OmniMoeThinkerTextDecoderLayer,TeacherModel"
+            # transformer_layer_cls_to_wrap: "Qwen3OmniMoeThinkerTextDecoderLayer,TeacherModel"
             use_orig_params: True
             sync_module_states: True
             cpu_ram_efficient_loading: True
@@ -150,4 +150,4 @@ save:
     # save_rotate_weight: True
     save_trans: True
     # save_fake: True
-    save_path: /code/omni_ostq_wa
+    save_path: /code/omni_ostq_w_bf16
