@@ -58,27 +58,35 @@ class QuarotOmni(BaseBlockwiseQuantization):
                 W_ = temp.reshape(init_shape)
                 layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
 
-        embeddings = self.model.get_embed_layers()
-        # # Rotate the vision embed layers
-        # vision_embed = [self.model.vision_embed.proj]
-        # if vision_embed is not None:
-        for vision_embed in embeddings:
+        embed_layer = self.model.get_embed_layers()
+        # Rotate the vision embed layers
+        if embed_layer is not None:
+            layer = embed_layer
             logger.info('Rotating vision head layers.')
-            for layer in vision_embed:
-                W_ = layer.weight.data
-                dtype = layer.weight.data.dtype
-                init_shape = W_.shape
-                temp = W_.reshape(self.hidden_size, -1)
-                # bake mean
-                temp = temp - temp.mean(dim=-2, keepdim=True)
-                temp = self.Q.T @ temp.to(device=self.dev, dtype=torch.float64)
-                W_ = temp.reshape(init_shape)
-                layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    b_ = layer.bias.data.double()
-                    b_ = b_ - b_.mean()
-                    layer.bias.data = self.Q.T @ b_.to(device=self.dev, dtype=torch.float64)
-                    layer.bias.data = layer.bias.data.to(layer.bias.device, dtype=dtype)
+            W_ = layer.weight.data
+            dtype = layer.weight.data.dtype
+            init_shape = W_.shape
+            temp = W_.reshape(self.hidden_size, -1)
+            # bake mean
+            temp = temp - temp.mean(dim=-2, keepdim=True)
+            temp = self.Q.T @ temp.to(device=self.dev, dtype=torch.float64)
+            W_ = temp.reshape(init_shape)
+            layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
+            if hasattr(layer, 'bias') and layer.bias is not None:
+                b_ = layer.bias.data.double()
+                b_ = b_ - b_.mean()
+                layer.bias.data = self.Q.T @ b_.to(device=self.dev, dtype=torch.float64)
+                layer.bias.data = layer.bias.data.to(layer.bias.device, dtype=dtype)
+
+        pos_embed_layer = self.model.get_pos_embed_layers()
+        # Rotate the vision position embed layers
+        if pos_embed_layer is not None:
+            layer = pos_embed_layer
+            logger.info('Rotating vision position embed layers.')
+            W_ = layer.weight.data
+            dtype = layer.weight.data.dtype
+            W_ = (W_ - W_.mean(dim=-1, keepdim=True)).to(device=self.dev, dtype=torch.float64) @ self.Q
+            layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
 
     def preprocess(self):
         if torch.equal(
