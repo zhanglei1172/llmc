@@ -246,7 +246,7 @@ def patch_module_to_cuda(base: object):
         else:
             delattr(base, attr)
 
-
+@torch.no_grad()
 def module_to_cuda(self: torch.nn.Module):
     """
     Move a module to CUDA

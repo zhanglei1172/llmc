@@ -154,6 +154,15 @@ class MyTrainer(Trainer):
                         m.cuda()
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             self.accelerator.state.fsdp_plugin.use_orig_params = True
+        # _old_prepare = Accelerator.prepare
+        # def _new_prepare(self, *args, **kwargs):
+        #     rets = _old_prepare(self, *args, **kwargs)
+        #     if isinstance(rets, nn.Module):
+        #         with patch_module_to_cuda(nn.Module):
+        #                 for m in self.accelerator.state.fsdp_plugin.ignored_modules:
+        #                     m.cuda()
+        #     return rets
+        # Accelerator.prepare = _new_prepare
 
     def training_step(
         self, model: nn.Module, inputs, num_items_in_batch=None
@@ -279,6 +288,14 @@ class MyTrainer(Trainer):
         return outputs
 
     def create_optimizer_and_scheduler(self, num_training_steps: int):
+        import geoopt
+        from geoopt.manifolds import EuclideanStiefel,Stiefel
+        with patch_module_to_cuda(nn.Module):
+            for m in self.accelerator.state.fsdp_plugin.ignored_modules:
+                m.cuda()
+                for name, param in m.named_parameters():
+                    if param.requires_grad and len(param.size())>1:
+                        m.register_parameter(name, geoopt.ManifoldParameter(param.data, manifold=Stiefel()))
 
         args = self.args
         params_rotate = []
@@ -286,10 +303,10 @@ class MyTrainer(Trainer):
         for param in self.model.parameters():
             param: torch.nn.Parameter
             if param.requires_grad:
-                if len(param.size()) == 2:
-                    params_rotate.append(param)
-                else:
+                if len(param.size()) == 1:
                     params_smooth.append(param)
+                else:
+                    params_rotate.append(param)
         dict_rotate = {
             "params": params_rotate,
             "lr": args.special.get("rotate_lr", 0.1),

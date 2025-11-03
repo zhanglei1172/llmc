@@ -89,6 +89,7 @@ class OSTQuant(SpinQuant):
                     Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads, block)
                 else:
                     Q2 = torch.stack([self.get_orthogonal_matrix(self.hidden_size // self.num_heads) for _ in range(self.num_key_value_heads)], dim=0)
+                    # Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
                 block.Q2 = RotateModule(Q2)
                 S_norm_qkv = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
                 S_qk = SmoothModule(torch.ones(layers_dict['self_attn.k_proj'].weight.shape[0]//2,dtype=torch.float32,device=self.dev)) # TODO //2 for 等价

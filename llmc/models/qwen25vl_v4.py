@@ -2,10 +2,13 @@ import inspect
 from typing import Optional, Union
 from importlib.metadata import version
 import packaging
+from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
 from accelerate import Accelerator, DistributedType
+from transformers.configuration_utils import PretrainedConfig
+
 from loguru import logger
 from transformers import AutoConfig, AutoProcessor, AutoTokenizer
 from llmc.compression.quantization.constant import ATTN_IMPL
@@ -47,6 +50,15 @@ class Qwen25VL_V4(Qwen25VL):
         logger.info(f"self.vlm_model_config : {self.vlm_model_config}")
         from accelerate import infer_auto_device_map, init_empty_weights
         import torch
+        def set_dtype(config, dtype):
+            if hasattr(config, 'dtype'):
+                config.dtype = dtype
+            for k in config:
+                sub_config = getattr(config, k)
+                if isinstance(sub_config, PretrainedConfig):
+                    set_dtype(sub_config, dtype)
+        if not isinstance(self.torch_dtype, str):
+            set_dtype(self.vlm_model_config, self.torch_dtype)
         if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
             with init_empty_weights():
                 self.vlm_model = Qwen2_5_VLForConditionalGeneration._from_config(

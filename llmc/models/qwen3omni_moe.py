@@ -5,6 +5,7 @@ import packaging
 from llmc.utils.registry_factory import MODEL_REGISTRY
 from transformers import AutoConfig, AutoProcessor, AutoModelForCausalLM
 import transformers
+from transformers.configuration_utils import PretrainedConfig
 transformers_version = packaging.version.parse(packaging.version.parse(transformers.__version__).base_version)
 if transformers_version >= packaging.version.parse('4.57.0'):
     latest_transformers = True
@@ -30,7 +31,15 @@ class Qwen3OmniMoe(BaseModel):
             if hasattr(self.vlm_model_config, 'use_cache'):
                 self.vlm_model_config.use_cache = False
         logger.info(f'self.vlm_model_config : {self.vlm_model_config}')
-
+        def set_dtype(config, dtype):
+            if hasattr(config, 'dtype'):
+                config.dtype = dtype
+            for k in config:
+                sub_config = getattr(config, k)
+                if isinstance(sub_config, PretrainedConfig):
+                    set_dtype(sub_config, dtype)
+        if not isinstance(self.torch_dtype, str):
+            set_dtype(self.vlm_model_config, self.torch_dtype)
         if latest_transformers:
             from transformers import Qwen3OmniMoeForConditionalGeneration
             from transformers import Qwen3OmniMoeProcessor
@@ -41,7 +50,7 @@ class Qwen3OmniMoe(BaseModel):
                     self.vlm_model = Qwen3OmniMoeForConditionalGeneration._from_config(
                         self.vlm_model_config,
                         # trust_remote_code=True,
-                        torch_dtype=self.torch_dtype,
+                        dtype=self.torch_dtype,
                         # low_cpu_mem_usage=True,
                         attn_implementation=ATTN_IMPL,
                     )
