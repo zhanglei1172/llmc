@@ -23,6 +23,22 @@ eval:
     bs: 1
     inference_per_block: False
 quant:
+    audio:
+        method: QuarotOmni
+        weight:
+            bit: 8
+            symmetric: True
+            granularity: per_channel
+            group_size: -1
+            calib_algo: minmax
+        act:
+            bit: 8
+            symmetric: True
+            granularity: per_token
+        special:
+            rotate_mode: hadamard
+            fp32_had: True
+            online_rotate: False
     vision:
         method: QuarotOmni
         weight:

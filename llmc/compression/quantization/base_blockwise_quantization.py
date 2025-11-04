@@ -287,6 +287,8 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.set_vision_model_config()
         elif self.quant_config.modality == 'language':
             self.set_model_config()
+        elif self.quant_config.modality == 'audio':
+            self.set_audio_model_config()
         self.modality = self.quant_config.modality
         logger.info(f'self.quant_objects : {self.quant_config.modality}')
 
@@ -324,6 +326,22 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.intermediate_size = self.model.vision_config.intermediate_size
         if hasattr(self.model.vision_config, 'num_key_value_heads'):
             self.num_key_value_heads = self.model.vision_config.num_key_value_heads
+            self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+            if self.num_key_value_groups > 1:
+                self.has_gqa = True
+            else:
+                self.has_gqa = False
+        else:
+            self.has_gqa = False
+
+    def set_audio_model_config(self):
+        self.hidden_size = self.model.audio_config.hidden_size
+        self.num_heads = self.model.audio_config.num_heads
+        self.head_dim = self.hidden_size // self.num_heads
+        if hasattr(self.model.audio_config, 'intermediate_size'):
+            self.intermediate_size = self.model.audio_config.intermediate_size
+        if hasattr(self.model.audio_config, 'num_key_value_heads'):
+            self.num_key_value_heads = self.model.audio_config.num_key_value_heads
             self.num_key_value_groups = self.num_heads // self.num_key_value_heads
             if self.num_key_value_groups > 1:
                 self.has_gqa = True

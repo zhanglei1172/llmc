@@ -1,4 +1,5 @@
 import soundfile as sf
+import torch
 
 from transformers import Qwen3OmniMoeForConditionalGeneration, Qwen3OmniMoeProcessor
 from transformers.models.qwen3_omni_moe.modeling_qwen3_omni_moe import Qwen3OmniMoeRMSNorm
@@ -36,6 +37,7 @@ def replace_layernorm_with_rmsnorm(module, attr_name):
             return True
     return False
 
+########### Visual Encoder ############
 # 1. 替换 visual blocks 中的 norm1 和 norm2
 for block in model.thinker.visual.blocks:
     replace_layernorm_with_rmsnorm(block, 'norm1')
@@ -48,14 +50,30 @@ for merger in model.thinker.visual.merger_list:
 # 3. 替换 merger 中的 ln_q
 replace_layernorm_with_rmsnorm(model.thinker.visual.merger, 'ln_q')
 
+############ Audio Encoder ############
+for layer in model.thinker.audio_tower.layers:
+    replace_layernorm_with_rmsnorm(layer, 'self_attn_layer_norm')
+    replace_layernorm_with_rmsnorm(layer, 'final_layer_norm')
+
+# 2. 替换 ln_post
+replace_layernorm_with_rmsnorm(model.thinker.audio_tower, 'ln_post')
+
+# 3. Rotate audio positional embedding
+audio_pos_embed = model.thinker.audio_tower.positional_embedding.positional_embedding
+audio_pos_embed_dtype = model.thinker.audio_tower.positional_embedding.positional_embedding.dtype
+audio_R1_matrix = torch.load("/path_to/audio_Q_matrix.pt")
+model.thinker.audio_tower.positional_embedding.positional_embedding = ((audio_pos_embed - audio_pos_embed.mean(dim=-1, keepdim=True)).to(torch.double) @ audio_R1_matrix).to(audio_pos_embed_dtype)
+
+
+
 conversation = [
     {
         "role": "user",
         "content": [
             # {"type": "video", "video": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-Omni/demo/draw.mp4"}
             {"type": "image", "image": "/dataset/workspace/lim42/cars.jpg"},
-            # {"type": "audio", "audio": "/dataset/workspace/lim42/audio.wav"},
-            {"type": "text", "text": "Tell me what you see?"},
+            {"type": "audio", "audio": "/dataset/workspace/lim42/audio.wav"},
+            {"type": "text", "text": "Tell me what you see and hear?"},
         ],
     },
 ]

@@ -39,14 +39,17 @@ class Qwen3Omni(Qwen3Moe):
         logger.info(f'self.omni_model : {self.omni_model}')
 
         self.vision_model = self.omni_model.thinker.visual
-        self.vision_embed = [[self.vision_model.patch_embed.proj], [self.vision_model.pos_embed]]
+        self.vision_embed = self.vision_model.patch_embed.proj
+        self.vision_pos_embed = self.vision_model.pos_embed
         self.vision_config = self.omni_model_config.thinker_config.vision_config
         self.vision_projector = [self.vision_model.merger] + [self.vision_model.merger_list[i] for i in range(len(self.vision_config.deepstack_visual_indexes))]
 
         self.audio_model = self.omni_model.thinker.audio_tower
-        self.audio_projector = self.audio_model.proj2
         self.audio_embed = self.audio_model.conv_out
         self.audio_config = self.omni_model_config.thinker_config.audio_config
+        self.audio_config.hidden_size = self.audio_config.d_model
+        self.audio_config.num_heads = self.audio_config.encoder_attention_heads
+        self.audio_config.head_dim = self.audio_config.hidden_size // self.audio_config.num_heads
 
         self.model = self.omni_model.thinker
         self.model_config = self.omni_model_config.thinker_config.text_config
@@ -74,13 +77,23 @@ class Qwen3Omni(Qwen3Moe):
         else:
             raise Exception(f'{self.get_modality()} modality not supported!')
 
+    def get_pos_embed_layers(self):
+        if self.get_modality() == 'language':
+            return None
+        elif self.get_modality() == 'vision':
+            return self.vision_pos_embed
+        elif self.get_modality() == 'audio':
+            return None
+        else:
+            raise Exception(f'{self.get_modality()} modality not supported!')
+
     def find_blocks(self):
         if self.get_modality() == 'language':
             super().find_blocks()
         elif self.get_modality() == 'vision':
             self.blocks = self.vision_model.blocks
         elif self.get_modality() == 'audio':
-            self.blocks = self.audio_model.blocks
+            self.blocks = self.audio_model.layers
         else:
             raise Exception(f'{self.get_modality()} modality not supported!')
         
@@ -162,19 +175,19 @@ class Qwen3Omni(Qwen3Moe):
                 },
                 {
                     'layers': {
-                        'mlp.fc1': block.mlp.fc1,
+                        'fc1': block.fc1,
                     },
                     'prev_op': [block.final_layer_norm],
-                    'input': ['mlp.fc1'],
-                    'inspect': block.mlp,
+                    'input': ['fc1'],
+                    'inspect': block.fc1,
                     'has_kwargs': False,
                     'is_mlp': True,
                 },
                 {
-                    'layers': {'mlp.fc2': block.mlp.fc2},
-                    'prev_op': [block.mlp.fc1],
-                    'input': ['mlp.fc2'],
-                    'inspect': block.mlp.fc2,
+                    'layers': {'fc2': block.fc2},
+                    'prev_op': [block.fc1],
+                    'input': ['fc2'],
+                    'inspect': block.fc2,
                     'has_kwargs': False,
                     'is_mlp': True,
                 },

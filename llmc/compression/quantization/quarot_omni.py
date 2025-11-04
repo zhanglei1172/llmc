@@ -23,10 +23,60 @@ class QuarotOmni(BaseBlockwiseQuantization):
         self.add_quant_config()
         if self.modality == 'vision':
             self.vision_preprocess()
+        elif self.modality == 'audio':
+            self.audio_preprocess()
         elif self.modality == 'language':
             self.preprocess()
         else:
             raise ValueError(f'Unsupported modality {self.modality}')
+
+    def audio_preprocess(self):
+        # self.Q = self.get_orthogonal_matrix()
+        self.Q = self.get_test_eye_matrix(self.hidden_size, self.dev)
+        self.R2 = random_hadamard_matrix(self.hidden_size // self.num_heads, self.dev)
+
+        audio_projector1 = self.model.audio_model.proj1
+        logger.info('Rotating audio projector layer.')
+        pre_audio_proj_ln = self.model.audio_model.ln_post
+        self.fuse_ln_fcs(pre_audio_proj_ln, [audio_projector1])
+        pre_audio_proj_ln_name = get_module_name(self.model.audio_model, pre_audio_proj_ln)
+        self.model.replace_module_subset(
+            LlmcRMSNorm,
+            self.model.audio_model,
+            {'layers': {pre_audio_proj_ln_name: pre_audio_proj_ln}},
+            None,
+            {},
+        )
+        audio_up_proj = [audio_projector1]
+        for layer in audio_up_proj:
+            W_ = layer.weight.data
+            dtype = layer.weight.data.dtype
+            init_shape = W_.shape
+            temp = W_.reshape(-1, init_shape[-1] // self.hidden_size, self.hidden_size)
+            temp = temp.to(device=self.dev, dtype=torch.float64) @ self.Q
+            W_ = temp.reshape(init_shape)
+            layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
+    
+        embed_layer = self.model.get_embed_layers()
+        # Rotate the audio embed layers
+        if embed_layer is not None:
+            layer = embed_layer
+            logger.info('Rotating audio head layers.')
+            W_ = layer.weight.data
+            dtype = layer.weight.data.dtype
+            init_shape = W_.shape
+            temp = W_.reshape(self.hidden_size, -1)
+            # bake mean
+            temp = temp - temp.mean(dim=-2, keepdim=True)
+            temp = self.Q.T @ temp.to(device=self.dev, dtype=torch.float64)
+            W_ = temp.reshape(init_shape)
+            layer.weight.data = W_.to(device=layer.weight.device, dtype=dtype)
+            if hasattr(layer, 'bias') and layer.bias is not None:
+                b_ = layer.bias.data.double()
+                b_ = b_ - b_.mean()
+                layer.bias.data = self.Q.T @ b_.to(device=self.dev, dtype=torch.float64)
+                layer.bias.data = layer.bias.data.to(layer.bias.device, dtype=dtype)
+        
 
     def vision_preprocess(self):
         self.Q = self.get_orthogonal_matrix()
@@ -205,7 +255,7 @@ class QuarotOmni(BaseBlockwiseQuantization):
             if self.config['model']['type'] in ['Opt', 'StableLm']:
                 self.bake_mean_into_fc(layers[0])
 
-            if self.config['model']['type'] in ['Qwen3Omni'] and self.model.get_modality() == 'vision':
+            if self.config['model']['type'] in ['Qwen3Omni'] and self.model.get_modality() != 'language':
                 self.bake_mean_into_fc(layers[0])
 
             if 'is_mlp' in subset and subset['is_mlp']:
