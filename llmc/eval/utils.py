@@ -13,6 +13,7 @@ from llmc.eval import (
     DebugEval,
     TokenConsistencyEval,
     KLDivergenceEval,
+    SNREval,
     VideoGenerateEval,
     VQAEval,
     V4Eval,
@@ -74,6 +75,8 @@ def get_eval_list(model, config):
                             eval_class = CustomGenerate(model, config_for_eval)
                         elif config_tmp.eval.type == "token_acc":
                             eval_class = TokenConsistencyEval(model, config_for_eval)
+                        elif config_tmp.eval.type == "snr":
+                            eval_class = SNREval(model, config_for_eval)
                         elif config_tmp.eval.type == "kl":
                             eval_class = KLDivergenceEval(model, config_for_eval)
                         elif config_tmp.eval.type == "mse":

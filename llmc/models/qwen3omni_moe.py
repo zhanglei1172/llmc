@@ -5,6 +5,7 @@ import packaging
 from llmc.utils.registry_factory import MODEL_REGISTRY
 from transformers import AutoConfig, AutoProcessor, AutoModelForCausalLM
 import transformers
+from qwen_omni_utils import process_mm_info
 from transformers.configuration_utils import PretrainedConfig
 transformers_version = packaging.version.parse(packaging.version.parse(transformers.__version__).base_version)
 if transformers_version >= packaging.version.parse('4.57.0'):
@@ -86,6 +87,10 @@ class Qwen3OmniMoe(BaseModel):
         self.vision_embed = self.vision_model.patch_embed
         self.vision_config = self.vlm_model_config.thinker_config.vision_config
         self.model = self.vlm_model.thinker
+        self.blocks = self.model.model.layers
+        self.embed_tokens = self.model.model.embed_tokens
+        self.rotary_emb = self.model.model.rotary_emb
+        self.modality_model = self.model.model
         # self.model.model = self.vlm_model.thinker
         self.model_config = self.vlm_model_config.thinker_config.text_config
         self.audio_config = self.vlm_model_config.thinker_config.audio_config
@@ -98,6 +103,77 @@ class Qwen3OmniMoe(BaseModel):
                        'to get more info of image resolution for performance boost.')
 
         self.processor.tokenizer.padding_side = 'left'
+
+    def batch_process(self, img_qas, calib_or_eval='eval', apply_chat_template=True, return_inputs=True, calib_cfg=None): # noqa
+        assert calib_or_eval == 'calib' or calib_or_eval == 'eval'
+        assert apply_chat_template
+        if calib_cfg is None:
+            calib_cfg = self.config.get(calib_or_eval, {})
+        if isinstance(img_qas[0], list):
+            messages = img_qas
+            texts = [
+                self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=False)
+                for msg in messages
+            ]
+        else:
+            messages = []
+            answers = []
+            for idx in range(len(img_qas)):
+                img_path = img_qas[idx]['image']
+                if img_path is not None:
+                    content = []
+                    if not isinstance(img_path, list):
+                        img_path = [img_path]
+                    for img_idx in range(len(img_path)):
+                        content.append({'type': 'image', 'image': resize_image(img_path[img_idx], 560, 560)})
+                    content.append({'type': 'text', 'text': img_qas[idx]['question']})
+                    message = [
+                        {
+                            'role': 'user',
+                            'content': content
+                        }
+                    ]
+                else:
+                    message = [
+                        {
+                            'role': 'user',
+                            'content': [
+                                {'type': 'text', 'text': img_qas[idx]['question']}
+                            ]
+                        }
+                    ]
+                messages.append(message)
+                answers.append(img_qas[idx]['answer'] if img_qas[idx]['answer'].endswith('<|im_end|>') else img_qas[idx]['answer'] + '<|im_end|>')
+
+
+            texts = [
+                self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+                for msg in messages
+            ]
+            if calib_or_eval == 'calib' and calib_cfg.get('add_answer', False):
+                texts = [
+                    texts[n] + answers[n]
+                    for n in range(len(texts))
+                ]
+        # if calib_or_eval == 'calib':
+        #     logger.info(f'Calib data is:\n{texts}')
+        if not return_inputs:
+            return texts
+        audio_inputs, image_inputs, video_inputs = process_mm_info(
+            messages, use_audio_in_video=True
+        )
+        inputs = self.processor(
+            text=texts,
+            audio=audio_inputs,
+            images=image_inputs,
+            videos=video_inputs,
+            padding="max_length" if calib_cfg.get('padding', True) else False,
+            max_length=calib_cfg.get('seq_len', None),
+            truncation=True,
+            return_tensors='pt',
+            use_audio_in_video=True,
+        )#.to(next(self.vlm_model.parameters()).dtype)
+        return inputs
 
     def set_modality(self, modality='language'):
         assert modality in ['audio', 'vision', 'language', 'video_gen']

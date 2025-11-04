@@ -35,13 +35,13 @@ quant:
         calib_algo: 
         ste: True
         minmax_fix: False
-    act:
-        bit: 8
-        symmetric: True
-        granularity: per_tensor
-        qmax_to_tensor: True
-        ste: True
-        # quant_attn: True
+    # act:
+    #     bit: 8
+    #     symmetric: True
+    #     granularity: per_tensor
+    #     qmax_to_tensor: True
+    #     ste: True
+    #     # quant_attn: True
     mix_bits:
         setting_0:
             layer_name: [down_proj]
@@ -51,11 +51,11 @@ quant:
                 symmetric: True
                 granularity: per_channel
                 ste: True
-            act:
-                bit: 16
-                symmetric: True
-                granularity: per_tensor
-                ste: True
+            # act:
+            #     bit: 16
+            #     symmetric: True
+            #     granularity: per_tensor
+            #     ste: True
     special:
         rotate_mode: hadamard #klt
         fp32_had: True
@@ -150,4 +150,4 @@ save:
     # save_rotate_weight: True
     save_trans: True
     # save_fake: True
-    save_path: /code/omni_ostq_wa_bf16
+    save_path: /code/omni_ostq_w_bf16

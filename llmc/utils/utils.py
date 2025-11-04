@@ -186,6 +186,35 @@ def get_non_persistent_buffers(module: torch.nn.Module, recurse: bool = False, f
     return non_persistent_buffers_set
 
 @contextlib.contextmanager
+def patch_attr(base: object, attr: str, value):
+    """
+    Patch the value of an object attribute. Original value is restored upon exit
+
+    :param base: object which has the attribute to patch
+    :param attr: name of the the attribute to patch
+    :param value: used to replace original value
+
+    Usage:
+    >>> from types import SimpleNamespace
+    >>> obj = SimpleNamespace()
+    >>> with patch_attr(obj, "attribute", "value"):
+    ...     assert obj.attribute == "value"
+    >>> assert not hasattr(obj, "attribute")
+    """
+    _sentinel = object()
+    original_value = getattr(base, attr, _sentinel) # 针对类方法、属性、实例属性
+    #setattr(base, attr, module_to_cuda.__get__(base)) 针对实例方法
+
+    setattr(base, attr, value)
+    try:
+        yield
+    finally:
+        if original_value is not _sentinel:
+            setattr(base, attr, original_value)
+        else:
+            delattr(base, attr)
+
+@contextlib.contextmanager
 def patch_module_to_cpu(base: object):
     """
     Patch the value of an object attribute. Original value is restored upon exit

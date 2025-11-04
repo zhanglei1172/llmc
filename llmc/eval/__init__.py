@@ -9,3 +9,4 @@ from .eval_video_generate import VideoGenerateEval
 from .eval_vqa import VQAEval
 from .eval_v4 import V4Eval
 from .eval_mse import MSEEval
+from .eval_snr import SNREval

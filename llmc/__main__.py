@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import gc
 import json
 import os
@@ -257,7 +258,7 @@ if __name__ == '__main__':
         config = yaml.safe_load(file)
     config = EasyDict(config)
 
-    init_process_group(backend='nccl')
+    init_process_group(backend='nccl', timeout=datetime.timedelta(seconds=7200))
     torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
 
     if int(os.environ['RANK']) != 0:
