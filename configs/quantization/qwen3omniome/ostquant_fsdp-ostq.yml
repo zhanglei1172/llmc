@@ -147,7 +147,7 @@ train:
         # save_total_limit: 1
 save:
     # Save the Spinquant-transformed model.
-    # save_rotate_weight: True
+    save_rotate_weight: True
     save_trans: True
     # save_fake: True
     save_path: /code/omni_ostq_wa_bf16
