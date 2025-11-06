@@ -1,0 +1,76 @@
+base:
+    seed: &seed 0
+model:
+    type: Qwen3OmniMoe
+    # path: /dataset/workspace/zhangl98/models/Qwen3-Omni-Thinking/ 
+    path: /dataset/workspace/zhangl98/models/Qwen3-Omni-30B-A3B-Instruct/ 
+    torch_dtype: auto
+# calib:
+#     name: wikitext2
+#     download: False
+#     path: /workspace/zhangl98@xiaopeng.com/dataset/calib/wikitext2/
+#     n_samples: 512
+#     bs: 32
+#     seq_len: 2048
+#     preproc: wikitext2_gptq
+#     seed: *seed
+eval:
+  - eval_pos: [fake_quant]
+    name: wikitext2
+    type: ppl
+    download: False
+    path: /workspace/zhangl98@xiaopeng.com/dataset/eval/wikitext2/
+    seq_len: 2048
+    bs: 1
+    inference_per_block: False
+#   - eval_pos: [fake_quant]
+#     type: vqa
+#     name: [mmmu]
+#     download: False
+#     path: /workspace/lim42@xiaopeng.com/dataset/mme/
+#     bs: 1
+#     limit: 200  # Limit test num for evaluation
+#     inference_per_block: False
+# ignored_layers:
+#     block_ids: [0-28]
+#     layer_names: ["mlp.down_proj"]
+quant:
+    # audio:
+    #     method: RTN
+    #     weight:
+    #         bit: 8
+    #         symmetric: True
+    #         granularity: per_channel
+    #         group_size: -1
+    #         calib_algo: minmax
+    #     act:
+    #         bit: 16
+    #         symmetric: True
+    #         granularity: per_tensor
+    # vision:
+    #     method: RTN
+    #     weight:
+    #         bit: 8
+    #         symmetric: True
+    #         granularity: per_channel
+    #         group_size: -1
+    #         calib_algo: minmax
+    #     act:
+    #         bit: 16
+    #         symmetric: True
+    #         granularity: per_token
+    language:
+        method: RTN
+        weight:
+            bit: 8
+            symmetric: True
+            granularity: per_channel
+            group_size: -1
+            calib_algo: minmax
+        # act:
+        #     bit: 16
+        #     symmetric: True
+        #     granularity: per_tensor
+save:
+    save_vllm: True
+    save_path: /code/omni_instr

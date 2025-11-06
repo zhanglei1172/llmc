@@ -4,7 +4,10 @@ from collections import defaultdict
 
 import torch
 import torch.nn as nn
-from diffusers import AutoencoderKLWan, WanPipeline
+try:
+    from diffusers import AutoencoderKLWan, WanPipeline
+except:
+    print('Please install diffusers to use WanT2V: pip install diffusers')
 from loguru import logger
 from PIL import Image
 

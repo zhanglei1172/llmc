@@ -7,6 +7,8 @@ import re
 from collections import defaultdict
 from functools import partial
 
+import glob
+import shutil
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -386,6 +388,8 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.set_vision_model_config()
         elif self.quant_config.modality == 'language':
             self.set_model_config()
+        elif self.quant_config.modality == 'audio':
+            self.set_audio_model_config()
         self.modality = self.quant_config.modality
         logger.info(f'self.quant_objects : {self.quant_config.modality}')
 
@@ -402,7 +406,7 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def set_model_config(self):
         self.hidden_size = self.model.model_config.hidden_size
         self.num_heads = self.model.model_config.num_attention_heads
-        self.head_dim = self.hidden_size // self.num_heads
+        self.head_dim = getattr(self.model.model_config, "head_dim", self.hidden_size // self.num_heads)
         if hasattr(self.model.model_config, 'intermediate_size'):
             self.intermediate_size = self.model.model_config.intermediate_size
         if hasattr(self.model.model_config, 'num_key_value_heads'):
@@ -424,6 +428,22 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         if hasattr(self.model.vision_config, 'num_key_value_heads'):
             self.num_key_value_heads = self.model.vision_config.num_key_value_heads
             self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+            if self.num_key_value_groups > 1:
+                self.has_gqa = True
+            else:
+                self.has_gqa = False
+        else:
+            self.has_gqa = False
+
+    def set_audio_model_config(self):
+        self.hidden_size = self.model.audio_config.d_model
+        self.num_heads = self.model.audio_config.encoder_attention_heads
+        self.head_dim = self.hidden_size // self.num_heads
+        if hasattr(self.model.audio_config, 'intermediate_size'):
+            self.intermediate_size = self.model.audio_config.intermediate_size
+        if hasattr(self.model.audio_config, 'num_key_value_heads'):
+            self.num_key_value_groups = 1
+            self.num_key_value_heads = self.num_heads // self.num_key_value_groups
             if self.num_key_value_groups > 1:
                 self.has_gqa = True
             else:
@@ -1167,6 +1187,12 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
                 self.get_replacement_params(mode=quant_format, w_only=self.w_only),
                 keep_device=keep_device,
             )
+        if self.modality == 'audio':
+            self.model.replace_audio_module_all(
+                module,
+                self.get_replacement_params(mode=quant_format, w_only=self.w_only),
+                keep_device=keep_device,
+            )
         if self.modality == 'language':
             self.model.replace_language_module_all(
                 module,
@@ -1245,9 +1271,24 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.model.avlm_model.save_pretrained(path)
             logger.info('save model done --')
             self.copy_tokenizer(path)
+        elif self.config.model.type in ['Qwen3OmniMoe']:
+            self.model.vlm_model.thinker = self.model.model
+            self.model.vlm_model.thinker.audio_tower = self.model.audio_model
+            self.model.vlm_model.thinker.visual = self.model.vision_model
+            self.model.vlm_model.thinker.visual.patch_embed = self.model.vision_embed
+            self.model.vlm_model.thinker.visual.merger = self.model.vision_projector
+            self.model.vlm_model.save_pretrained(path)
+            logger.info('save model done --')
+            self.copy_tokenizer(path)
+            copy_files(self.config.model.path, path, 'preprocessor_config')
+            copy_files(self.config.model.path, path, 'chat_template')
+            for filename in glob.glob(os.path.join(self.config.model.path, '*.py')):
+                shutil.copy(filename, path)
         else:
             self.model.get_model().save_pretrained(path)
             logger.info('save model done --')
             self.copy_tokenizer(path)
             copy_files(self.config.model.path, path, 'preprocessor_config')
             copy_files(self.config.model.path, path, 'chat_template')
+            for filename in glob.glob(os.path.join(self.config.model.path, '*.py')):
+                shutil.copy(filename, path)

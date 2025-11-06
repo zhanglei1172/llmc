@@ -6,7 +6,10 @@ from collections import defaultdict
 import numpy as np
 import torch
 import torch.nn as nn
-from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+try:
+    from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+except:
+    print('Please install diffusers to use WanI2V: pip install diffusers')
 from diffusers.utils import load_image
 from loguru import logger
 from PIL import Image

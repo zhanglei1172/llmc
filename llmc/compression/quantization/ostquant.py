@@ -53,31 +53,6 @@ class OSTQuant(SpinQuant):
         # self.o_proj_group_quant = self.quant_config['special']['o_proj_group_quant']
 
 
-    # def register_lmhead_spin_parameters(self):
-    #     pre_head_ln = self.model.get_pre_head_layernorm_layers()[0]
-    #     pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
-    #     S_head = SmoothModule(torch.ones(pre_head_ln.weight.shape[0],dtype=torch.float32,device=self.dev))
-    #     self.model.modality_model.S_head = S_head
-    #     args = {'Sout': S_head}
-    #     params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
-    #     self.model.replace_module_subset(
-    #         LlmcScaleRMSNorm,
-    #         self.model.model,
-    #         {'layers': {pre_head_ln_name: pre_head_ln}},
-    #         None,
-    #         params_dict,
-    #     )
-    #     args = {'Sin': S_head, 'Q1': self.model.modality_model.Q1}
-    #     params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
-    #     head_layers = {get_module_name(self.model.model, h): h for h in self.model.get_head_layers()}
-    #     self.model.replace_module_subset(
-    #         RotateLinear2,
-    #         self.model.model,
-    #         {'layers': head_layers},
-    #         None,
-    #         params_dict,
-    #     )
-
     def w_rot(self, module, w_rotater, args):
         return w_rotater.rotate(module.weight, module.bias, args.get('Q1'), args.get('Q2'), args.get('transpose'), args.get('Sin'), args.get('Sout'), args.get('inverse_out'), self.had_dim, args.get('is_qk',False))
 
@@ -114,6 +89,7 @@ class OSTQuant(SpinQuant):
                     Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads, block)
                 else:
                     Q2 = torch.stack([self.get_orthogonal_matrix(self.hidden_size // self.num_heads) for _ in range(self.num_key_value_heads)], dim=0)
+                    # Q2 = self.get_orthogonal_matrix(self.hidden_size // self.num_heads)
                 block.Q2 = RotateModule(Q2)
                 S_norm_qkv = SmoothModule(torch.ones(prev_op[0].weight.shape[0],dtype=torch.float32,device=self.dev))
                 S_qk = SmoothModule(torch.ones(layers_dict['self_attn.k_proj'].weight.shape[0]//2,dtype=torch.float32,device=self.dev)) # TODO //2 for 等价
@@ -233,7 +209,7 @@ class OSTQuant(SpinQuant):
             pre_head_ln.weight.data = weight.data
             if bias is not None:
                 pre_head_ln.bias.data = bias.data
-            pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
+            # pre_head_ln_name = get_module_name(self.model.model, pre_head_ln)
             pre_head_ln.cpu()
         lm_head_layer = self.model.get_head_layers()[0]
         if isinstance(lm_head_layer, RotateLinear2):

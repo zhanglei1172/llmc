@@ -5,8 +5,13 @@ import torch
 from accelerate import Accelerator, DistributedType, InitProcessGroupKwargs
 from accelerate.state import AcceleratorState
 from lmms_eval.api.model import lmms
-from lmms_eval.models.llava_onevision import Llava_OneVision as LLaVA_OV
 from loguru import logger
+try:
+    from lmms_eval.models.llava_onevision import Llava_OneVision as LLaVA_OV
+except Exception as e:
+    class LLaVA_OV:
+        pass
+    logger.debug('LMMS Eval Llava_OneVision model not be found. If you need it, please install lmms-eval package.\nError: %s' % e)
 from packaging import version
 from transformers import AutoConfig
 

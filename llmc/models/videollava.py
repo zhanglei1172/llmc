@@ -5,8 +5,15 @@ import torch
 from accelerate import Accelerator, DistributedType, InitProcessGroupKwargs
 from accelerate.state import AcceleratorState
 from lmms_eval.api.model import lmms
-from lmms_eval.models.video_llava import VideoLLaVA as VL
 from loguru import logger
+try:
+    from lmms_eval.models.video_llava import VideoLLaVA as VL
+except:
+    class VL:
+        pass
+    logger.debug(
+        'LMMS Eval VideoLLaVA model not be found. If you need it, please install lmms-eval package.'
+    )
 from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
                           GenerationConfig, VideoLlavaForConditionalGeneration,
                           VideoLlavaProcessor)

@@ -96,7 +96,8 @@ class Awq(BaseBlockwiseQuantization):
     @torch.no_grad()
     def get_scales(self, prev_op, x, w_max, is_gqa, ratio):
         if is_gqa:
-            x_tmp = prev_op(x)
+            # x_tmp = prev_op(x)
+            x_tmp = x.view(x.shape[0], -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim).mean(-2).view(x.shape[0], -1, self.num_key_value_heads * self.head_dim)  # noqa
             w_tmp = self.get_weight_scale({'prev_op': prev_op})
         else:
             x_tmp = x
@@ -247,8 +248,10 @@ class Awq(BaseBlockwiseQuantization):
             loss_mean = 0
             scales_mean = 0
             for i in range(len(input)):
-                input[i] = input[i].to(next(inspect_module.parameters()).device)
-                x = input[i]
+                x = input[i].to(next(inspect_module.parameters()).device)
+                # if is_gqa:
+                #     x = prev_op(x)
+                #     x = x.view((*x.shape[:-1], self.num_key_value_heads, self.head_dim)).repeat(1, self.num_key_value_groups, 1)
                 if isinstance(subset_kwargs, list):
                     kwargs = subset_kwargs[i]
                 else:
@@ -291,6 +294,7 @@ class Awq(BaseBlockwiseQuantization):
                     best_error = loss_mean
                     best_scales = scales_mean
                 if self.save_mem:
+                    del x
                     del org_out
                     del out
                     gc.collect()
@@ -398,7 +402,7 @@ class Awq(BaseBlockwiseQuantization):
                 if self.has_gqa and self.do_gqa_trans:
                     is_gqa = True
                     input_keys = list(input_feat.keys())
-                    input_name = input_keys[input_keys.index(input_name) - 1]
+                    # input_name = input_keys[input_keys.index(input_name) - 1]
                 else:
                     logger.info('Cannot apply scale. Do not transform this subset.')
                     return

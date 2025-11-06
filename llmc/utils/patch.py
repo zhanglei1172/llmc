@@ -26,7 +26,7 @@ from transformers.tokenization_utils_base import (
 from transformers.utils import (
     PaddingStrategy,
     TensorType,
-    is_tf_tensor,
+    # is_tf_tensor,
     is_torch_tensor,
     to_py_obj,
 )
@@ -89,9 +89,9 @@ def pad(
                 break
     # At this state, if `first_element` is still a list/tuple, it's an empty one so there is nothing to do.
     if not isinstance(first_element, (int, list, tuple)):
-        if is_tf_tensor(first_element):
-            return_tensors = "tf" if return_tensors is None else return_tensors
-        elif is_torch_tensor(first_element):
+        # if is_tf_tensor(first_element):
+        #     return_tensors = "tf" if return_tensors is None else return_tensors
+        if is_torch_tensor(first_element):
             return_tensors = "pt" if return_tensors is None else return_tensors
         elif isinstance(first_element, np.ndarray):
             return_tensors = "np" if return_tensors is None else return_tensors

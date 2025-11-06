@@ -488,6 +488,7 @@ class LlmcQwen2_5_VLAttention(nn.Module):
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
+        **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
@@ -527,7 +528,7 @@ class LlmcQwen2_5_VLAttention(nn.Module):
         if not output_attentions:
             attn_weights = None
 
-        return attn_output, attn_weights, past_key_value
+        return attn_output, attn_weights#, past_key_value
 
     @torch.compile(fullgraph=True, disable=not USE_COMPILE)
     def _atten_func(self, query_states, key_states, value_states, attention_mask, output_attentions):

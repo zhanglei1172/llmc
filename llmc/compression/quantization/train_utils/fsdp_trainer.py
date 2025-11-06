@@ -29,13 +29,15 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from accelerate.utils import DistributedDataParallelKwargs
 from accelerate import Accelerator
+from ..constant import USE_COMPILE
 
+from llmc.utils.utils import patch_module_to_cuda
 import os
 import nni
 
 
 def pt_fsdp_state_dict(model: torch.nn.Module):
-    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
+    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     with PT_FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
         return model.state_dict()
 
@@ -76,8 +78,9 @@ class FSDPTrainer(Trainer):
         )
         if hasattr(self.accelerator.state, 'fsdp_plugin') and self.accelerator.state.fsdp_plugin is not None:
             # Do not wrap rotation matrix
-            for ignored_module in ignored_modules:
-                ignored_module.to(torch.cuda.current_device())
+            with patch_module_to_cuda(nn.Module):
+                for ignored_module in ignored_modules:
+                    ignored_module.cuda()
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             # self.accelerator.state.fsdp_plugin.fsdp_version = 2
             # self.accelerator.state.fsdp_plugin.reshard_after_forward = True
@@ -143,12 +146,23 @@ class MyTrainer(Trainer):
         ):
             model: nn.Module = self.model
             ignored_modules = list()
-            for m in model.modules():
-                if isinstance(m, (RotateModule, SmoothModule)):
-                    ignored_modules.append(m)
-                    m.to(torch.cuda.current_device())
+            with patch_module_to_cuda(nn.Module):
+                for m in model.modules():
+                    if isinstance(m, (RotateModule, SmoothModule)):
+                        ignored_modules.append(m)
+                        # m.to(torch.cuda.current_device())
+                        m.cuda()
             self.accelerator.state.fsdp_plugin.ignored_modules = ignored_modules
             self.accelerator.state.fsdp_plugin.use_orig_params = True
+        # _old_prepare = Accelerator.prepare
+        # def _new_prepare(self, *args, **kwargs):
+        #     rets = _old_prepare(self, *args, **kwargs)
+        #     if isinstance(rets, nn.Module):
+        #         with patch_module_to_cuda(nn.Module):
+        #                 for m in self.accelerator.state.fsdp_plugin.ignored_modules:
+        #                     m.cuda()
+        #     return rets
+        # Accelerator.prepare = _new_prepare
 
     def training_step(
         self, model: nn.Module, inputs, num_items_in_batch=None
@@ -159,7 +173,7 @@ class MyTrainer(Trainer):
             nni.report_intermediate_result(loss.item())
         return loss
 
-    @torch.compile(fullgraph=False)
+    @torch.compile(fullgraph=False, disable=not USE_COMPILE)
     def compute_loss(self, model, inputs, **kwargs):
         args = self.args
         loss_type = args.special.get("loss_type", "origin")
@@ -274,6 +288,14 @@ class MyTrainer(Trainer):
         return outputs
 
     def create_optimizer_and_scheduler(self, num_training_steps: int):
+        import geoopt
+        from geoopt.manifolds import EuclideanStiefel,Stiefel
+        with patch_module_to_cuda(nn.Module):
+            for m in self.accelerator.state.fsdp_plugin.ignored_modules:
+                m.cuda()
+                for name, param in m.named_parameters():
+                    if param.requires_grad and len(param.size())>1:
+                        m.register_parameter(name, geoopt.ManifoldParameter(param.data, manifold=Stiefel()))
 
         args = self.args
         params_rotate = []
@@ -281,10 +303,10 @@ class MyTrainer(Trainer):
         for param in self.model.parameters():
             param: torch.nn.Parameter
             if param.requires_grad:
-                if len(param.size()) == 2:
-                    params_rotate.append(param)
-                else:
+                if len(param.size()) == 1:
                     params_smooth.append(param)
+                else:
+                    params_rotate.append(param)
         dict_rotate = {
             "params": params_rotate,
             "lr": args.special.get("rotate_lr", 0.1),

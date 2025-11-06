@@ -2,16 +2,21 @@ import torch
 from loguru import logger
 
 from llmc.utils.registry_factory import MODEL_REGISTRY
+from llmc.utils.utils import patch_attr
 
 from .eval_base import BaseEval
 
 
 class KLDivergenceEval(BaseEval):
+    def __init__(self, model, config):
+        super().__init__(model, config)
+        self.ref_path = self.eval_cfg.get('ref_path', self.config.model.path)
 
     @torch.no_grad()
     def eval_func(self, model, testenc, seq_len, bs, eval_pos):
         handles_origin = []
-        model_origin = MODEL_REGISTRY[self.config.model.type](self.config)
+        with patch_attr(self.config.model, 'path', self.ref_path):
+            model_origin = MODEL_REGISTRY[self.config.model.type](self.config)
         if self.inference_per_block:
             handles_origin = self.register_hooks(model_origin)
         else:

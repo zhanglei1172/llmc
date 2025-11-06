@@ -1,30 +1,40 @@
 import copy
 import gc
+import json
 import os
 from functools import partial
-import json
 
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers import (default_data_collator, AutoTokenizer)
+from transformers import AutoTokenizer, default_data_collator
 
-from llmc.utils.registry_factory import ALGO_REGISTRY
-from llmc.data import MixDataset, BaseTokenizer, TrainJsonDataset
-from llmc.utils.registry_factory import MODEL_REGISTRY
+from llmc.data import BaseTokenizer, MixDataset, TrainJsonDataset
+from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
 
-from .train_utils.fsdp_trainer import MyTrainer
-from .train_utils.train_utils import LLMCTrainingArguments
+from . import constant
 from .base_blockwise_quantization import BaseBlockwiseQuantization
 from .hadamard_utils import apply_exact_had_to_linear, random_hadamard_matrix
 from .module_utils import *
-from .module_utils import (_LLMC_LN_TYPES_, _TRANSFORMERS_LN_TYPES_,
-                           EffcientFakeQuantLinear, FakeQuantLinear, RotateFakeQuantLinear,
-                           LlmcRMSNorm, OriginEmbedding, OriginFloatLinear,
-                           OriginFloatConv3d,
-                           RotateEmbedding, RotateLinear2, _ROTATE_LINEAR_MAP_,
-                           _REALQUANT_LINEAR_MAP_, get_module_name)
+from .module_utils import (
+    _LLMC_LN_TYPES_,
+    _REALQUANT_LINEAR_MAP_,
+    _ROTATE_LINEAR_MAP_,
+    _TRANSFORMERS_LN_TYPES_,
+    EffcientFakeQuantLinear,
+    FakeQuantLinear,
+    LlmcRMSNorm,
+    OriginEmbedding,
+    OriginFloatConv3d,
+    OriginFloatLinear,
+    RotateEmbedding,
+    RotateFakeQuantLinear,
+    RotateLinear2,
+    get_module_name,
+)
 from .rotate_utils import ActRotater, RotateModule, WeightRotater
+from .train_utils.fsdp_trainer import MyTrainer
+from .train_utils.train_utils import LLMCTrainingArguments
 
 
 @ALGO_REGISTRY
@@ -38,6 +48,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             self.vision_preprocess()
         elif self.modality == 'language':
             self.preprocess()
+        elif self.modality == 'audio':
+            self.audio_preprocess()
         else:
             raise ValueError(f'Unsupported modality {self.modality}')
 
@@ -58,6 +70,65 @@ class SpinQuant(BaseBlockwiseQuantization):
         vision_projector = self.model.vision_projector
         if vision_projector is not None:
             logger.info('Rotating vision projector layer.')
+            pre_vison_proj_ln = vision_projector.ln_q
+            self.fuse_ln_fcs(pre_vison_proj_ln, [vision_projector.mlp[0]])
+            pre_vison_proj_ln_name = get_module_name(vision_projector, pre_vison_proj_ln)
+            self.model.replace_module_subset(
+                LlmcRMSNorm,
+                self.model.vision_projector,
+                {'layers': {pre_vison_proj_ln_name: pre_vison_proj_ln}},
+                None,
+                {},
+            )
+            vision_up_proj = [self.model.vision_projector.mlp[0]]
+            for layer in vision_up_proj:
+                rot_layer_name = get_module_name(self.model.model, layer)
+                layers_dict[rot_layer_name] = layer
+        if layers_dict:
+            self.model.replace_module_subset(
+                RotateLinear2,
+                self.model.model,
+                {'layers': layers_dict},
+                None,
+                params_dict
+            )
+
+        # Rotate the vision embed layers
+
+        args = {}
+        args['Q1'] = self.model.modality_model.Q1
+        args['Q2'] = None
+        args['transpose'] = True
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        vision_embed = [self.model.vision_embed.proj]
+        if vision_embed is not None:
+            logger.info('Rotating vision head layers.')
+            for layer in vision_embed:
+                rot_layer_name = get_module_name(self.model.model, layer)
+
+                self.model.replace_module_subset(
+                    _ROTATE_LINEAR_MAP_[type(layer)],
+                    self.model.model,
+                    {'layers': {rot_layer_name: layer}},
+                    None,
+                    params_dict
+                )
+
+    def audio_preprocess(self):
+        for m in self.model.modality_model.parameters():
+            m.requires_grad = False
+        Q1 = self.get_orthogonal_matrix(self.hidden_size)
+        self.model.modality_model.Q1 = RotateModule(Q1)
+        # Rotate the audio projector
+        layers_dict = {}
+        args = {}
+        args['Q1'] = self.model.modality_model.Q1
+        args['Q2'] = None
+        args['transpose'] = False
+        params_dict = self.get_replacement_params(mode='rotate', w_only=self.w_only, name=None, args=args)
+        layers = self.model.get_prev_decoder_layers()
+        if layers:
+            logger.info('Rotating audio projector layer.')
             pre_vison_proj_ln = vision_projector.ln_q
             self.fuse_ln_fcs(pre_vison_proj_ln, [vision_projector.mlp[0]])
             pre_vison_proj_ln_name = get_module_name(vision_projector, pre_vison_proj_ln)
@@ -478,7 +549,7 @@ class SpinQuant(BaseBlockwiseQuantization):
                     None,
                     {}
                 )
-                del self._vision_rotate_layers
+            del self._vision_rotate_layers
 
 
     def deploy(self, quant_format, keep_device=False):
@@ -506,6 +577,10 @@ class SpinQuant(BaseBlockwiseQuantization):
                 params_dict["w_only_default"] = self.w_only
             if self.modality == 'vision':
                 self.model.replace_vision_module_all(
+                    RotateFakeQuantLinear, params_dict
+                )
+            elif self.modality == 'audio':
+                self.model.replace_audio_module_all(
                     RotateFakeQuantLinear, params_dict
                 )
             else:
@@ -542,7 +617,19 @@ class SpinQuant(BaseBlockwiseQuantization):
 
     def train(self, tokenizer=None):
         # ignored_modules = []
+        change_records = []
+        for _, module in self.model.model.named_modules():
+            # register_buffer as persistent to avoid issues in load_state_dict
+            change_name_list = list(module._non_persistent_buffers_set)
+            for buffer_name in change_name_list:
+                module._non_persistent_buffers_set.discard(buffer_name)
+                change_records.append((module, buffer_name))
+        state_dict = self.model.model.state_dict()
+        self.model.model.to("meta")
         llmc_model_to_train = copy.deepcopy(self.model)
+        if int(os.environ['RANK']) == 0:
+            llmc_model_to_train.model.load_state_dict(state_dict, assign=True)
+        del state_dict
         llmc_model_to_train.config.calib = self.config.train.data
         # ignored_modules.extend(self.get_ignored_modules(llmc_model_to_train))
         llmc_model_to_train.model.config.use_cache = False
@@ -592,7 +679,10 @@ class SpinQuant(BaseBlockwiseQuantization):
             _backup = self.config.model.path
             if train_args.special.get("teacher_path"):
                 self.config.model.path = train_args.special.get("teacher_path")
+            # old_ = constant.ATTN_IMPL
+            # constant.set_attn_impl("flash_attention_2")
             teacher_model = MODEL_REGISTRY[self.config.model.type](self.config).model
+            # constant.set_attn_impl(old_)
             self.config.model.path = _backup
             teacher_model.eval()
             for param in teacher_model.parameters():
@@ -601,8 +691,9 @@ class SpinQuant(BaseBlockwiseQuantization):
             llmc_model_to_train.model.teacher = TeacherModel(teacher_model)
         # from trl.trainer.utils import DataCollatorForCompletionOnlyLM
         # from accelerate.utils import operations
-        from llmc.utils import patch
         from types import MethodType
+
+        from llmc.utils import patch
         # _concatenate = operations.concatenate
         # operations.concatenate = patch.concatenate
         train_tokenizer.pad = MethodType(patch.pad, train_tokenizer)
@@ -613,8 +704,8 @@ class SpinQuant(BaseBlockwiseQuantization):
             train_dataset=train_data,
             eval_dataset=None,
             # data_collator=default_data_collator,
-            # data_collator=patch.CustomDataCollatorForCompletionOnlyLM("<|im_start|>assistant\n", tokenizer=train_tokenizer, pad_to_multiple_of=8),
-            data_collator=patch.CustomDataCollatorForCompletionOnlyLM([-1], tokenizer=train_tokenizer, pad_to_multiple_of=8),
+            data_collator=patch.CustomDataCollatorForCompletionOnlyLM("<|im_start|>assistant\n", tokenizer=train_tokenizer, pad_to_multiple_of=8),
+            # data_collator=patch.CustomDataCollatorForCompletionOnlyLM([-1], tokenizer=train_tokenizer, pad_to_multiple_of=8),
             # optimizers=(optimizer, None),
             # optimizers=(None, None),
             # ignored_modules=ignored_modules,
@@ -638,8 +729,12 @@ class SpinQuant(BaseBlockwiseQuantization):
         # self.model.model.to('cpu')
         # self.model.model.load_state_dict(trainer.get_trained_params(), device_map='auto')
         state_dict = trainer.get_trained_params()
-        model_state = self.model.model.state_dict()
-        for name, param in model_state.items():
-            if name in state_dict:
-                # 保持原 device，只拷贝数据
-                param.copy_(state_dict[name].to(param.device, dtype=param.dtype))
+        # model_state = self.model.model.state_dict()
+        if int(os.environ['RANK']) == 0:
+            self.model.model.load_state_dict(state_dict, assign=True)
+        for module, buffer_name in change_records:
+            module._non_persistent_buffers_set.add(buffer_name)
+            # for name, param in model_state.items():
+            #     if name in state_dict:
+            #         # 保持原 device，只拷贝数据
+            #         param.copy_(state_dict[name].to(param.device, dtype=param.dtype))

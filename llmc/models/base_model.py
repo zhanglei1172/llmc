@@ -56,7 +56,7 @@ class BaseModel(metaclass=ABCMeta):
             self.model.eval()
         except: # noqa
             pass
-        self.update_key_info()
+        # self.update_key_info()
         if self.mm_model:
             self.mm_model.eval()
 
@@ -403,6 +403,26 @@ class BaseModel(metaclass=ABCMeta):
         gc.collect()
         torch.cuda.empty_cache()
         logger.info(f'The Replaced vision_model: {self.vision_model}')
+
+    def replace_audio_module_all(self, module, params_dict, keep_device=False):
+        audio_model_linears = self.get_block_linears(self.audio_model)
+        for name, m in audio_model_linears.items():
+            M = module.new(m, **params_dict)
+
+            name_tmp = name.rsplit('.', 1)
+            if len(name_tmp) == 2:
+                parent_name = name_tmp[0]
+                parent = self.audio_model.get_submodule(parent_name)
+                child_name = name_tmp[1]
+            elif len(name_tmp) == 1:
+                parent = self.audio_model
+                child_name = name_tmp[0]
+
+            setattr(parent, child_name, M)
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        logger.info(f'The Replaced audio_model: {self.audio_model}')
 
     def replace_language_module_all(self, module, params_dict, keep_device=False):
         for block_idx in range(len(self.blocks)):
