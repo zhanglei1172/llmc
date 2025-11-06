@@ -4,7 +4,7 @@ model:
     type: Qwen25VL_V4
     path: /dataset/v5_model/v5_model_release/checkpoint-10000/
     tokenizer_mode: slow
-    torch_dtype: torch.bfloat16
+    torch_dtype: torch.float32
 eval:
     - 
         eval_pos: [transformed, fake_quant]
@@ -56,11 +56,11 @@ quant:
                 granularity: per_tensor
                 ste: True
     special:
-        rotate_mode: hadamard
+        rotate_mode: klt
         fp32_had: True
         online_rotate: False
         mixed_precision:
-        # selected_layers: []
+        # selected_layers: ["S_norm_qkv", "S_norm_upgate", "S_qk", "S_ov"]
 # ignored_layers:
 #     block_ids: [0-28]
 #     layer_names: ["mlp.down_proj"]
@@ -99,7 +99,7 @@ train:
         #     apply_chat_template: True
         #     cache_dir: 
     train_args:
-        warmup_steps: 0
+        warmup_steps: 30
         dataloader_drop_last: True
         accelerator_config:
             dispatch_batches: True
@@ -112,7 +112,7 @@ train:
             smooth_momentum: 0.9
             # teacher_path: 
         # num_train_epochs: 1
-        max_steps: 150
+        max_steps: 300
         save_strategy: 'no'
         seed: *seed
         fp16: False
@@ -137,14 +137,12 @@ train:
         fsdp_config:
             # activation_checkpointing: True
             use_orig_params: True
-            sync_module_states: True
-            cpu_ram_efficient_loading: True
         # eval_strategy: "steps"
         # load_best_model_at_end: True
         # save_total_limit: 1
-# save:
-#     # Save the Spinquant-transformed model.
-#     # save_rotate_weight: True
-#     save_trans: True
-#     save_fake: True
-#     save_path: /dataset/workspace/zhangl98/v5-0905/w4a8/ostq_mix_kl_mp-d_prot-softmax 
+save:
+    # Save the Spinquant-transformed model.
+    # save_rotate_weight: True
+    save_trans: True
+    save_fake: True
+    save_path: /dataset/workspace/zhangl98/v5-0905/w4a8/ostq_mix_kl_mp-d_prot-softmax 

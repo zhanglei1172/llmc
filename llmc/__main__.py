@@ -26,6 +26,7 @@ from llmc.utils import (check_config, deploy_all_modality, get_modality,
 from llmc.utils.registry_factory import ALGO_REGISTRY, MODEL_REGISTRY
 from llmc.utils.utils import patch_module_to_cpu, patch_module_to_cuda
 
+import nni
 
 import nni
 
