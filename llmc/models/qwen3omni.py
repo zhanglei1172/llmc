@@ -55,7 +55,7 @@ class Qwen3Omni(Qwen3Moe):
         self.model_config = self.omni_model_config.thinker_config.text_config
 
         self.processor = AutoProcessor.from_pretrained(
-            self.model_path, trust_remote_code=True
+            self.model_path#, trust_remote_code=True
         )
         self.processor.tokenizer.padding_side = 'left'
 

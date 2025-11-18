@@ -31,8 +31,9 @@ class QuarotOmni(BaseBlockwiseQuantization):
             raise ValueError(f'Unsupported modality {self.modality}')
 
     def audio_preprocess(self):
-        # self.Q = self.get_orthogonal_matrix()
-        self.Q = self.get_test_eye_matrix(self.hidden_size, self.dev)
+        self.Q = self.get_orthogonal_matrix()
+        # self.Q = self.get_test_eye_matrix(self.hidden_size, self.dev)
+        torch.save(self.Q, self.config.save.save_path + '/quarot_audio_R1_matrix.pt')
         self.R2 = random_hadamard_matrix(self.hidden_size // self.num_heads, self.dev)
 
         audio_projector1 = self.model.audio_model.proj1
@@ -80,6 +81,7 @@ class QuarotOmni(BaseBlockwiseQuantization):
 
     def vision_preprocess(self):
         self.Q = self.get_orthogonal_matrix()
+        torch.save(self.Q, self.config.save.save_path + '/quarot_vision_R1_matrix.pt')
         # self.Q = self.get_test_eye_matrix(self.hidden_size, self.dev)
         self.R2 = random_hadamard_matrix(self.hidden_size // self.num_heads, self.dev)
 
@@ -152,6 +154,7 @@ class QuarotOmni(BaseBlockwiseQuantization):
             self.remove_mean_from_embed()
 
         self.Q = self.get_orthogonal_matrix()
+        torch.save(self.Q, self.config.save.save_path + '/quarot_text_R1_matrix.pt')
         self.R2 = random_hadamard_matrix(self.hidden_size // self.num_heads, self.dev)
         self.rotate_embeddings(self.Q)
 
@@ -251,6 +254,12 @@ class QuarotOmni(BaseBlockwiseQuantization):
         if isinstance(prev_op[0], tuple(_LLMC_LN_TYPES_ + _TRANSFORMERS_LN_TYPES_)):
             self.fuse_ln_fcs(prev_op[0], layers)
             self.rotate_pre_layers(layers, self.Q)
+            if self.modality == 'audio':
+                for layer in layers:
+                    if 'q_proj' in get_module_name(self.model.model, layer):
+                        apply_exact_had_to_linear(layer, had_dim=self.head_dim, output=True, R2=self.R2)
+                    if 'k_proj' in get_module_name(self.model.model, layer):
+                        apply_exact_had_to_linear(layer, had_dim=self.head_dim, output=True, R2=self.R2)
         else:
             if self.config['model']['type'] in ['Opt', 'StableLm']:
                 self.bake_mean_into_fc(layers[0])
