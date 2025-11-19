@@ -376,6 +376,26 @@ class BaseModel(metaclass=ABCMeta):
     def get_moe_gate(self, block):
         return None
 
+    def replace_audio_module_all(self, module, params_dict, keep_device=False):
+        audio_model_linears = self.get_block_linears(self.audio_model)
+        for name, m in audio_model_linears.items():
+            M = module.new(m, **params_dict)
+
+            name_tmp = name.rsplit('.', 1)
+            if len(name_tmp) == 2:
+                parent_name = name_tmp[0]
+                parent = self.audio_model.get_submodule(parent_name)
+                child_name = name_tmp[1]
+            elif len(name_tmp) == 1:
+                parent = self.audio_model
+                child_name = name_tmp[0]
+
+            setattr(parent, child_name, M)
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        logger.info(f'The Replaced audio_model: {self.audio_model}')
+
     def replace_vision_module_all(self, module, params_dict, keep_device=False):
         vision_model_linears = self.get_block_linears(self.vision_model)
         for name, m in vision_model_linears.items():
