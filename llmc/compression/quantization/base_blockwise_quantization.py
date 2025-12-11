@@ -379,9 +379,9 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
         # set online-rotation config
         self.online_rotate = special_config.get('online_rotate', False)
         if self.online_rotate:
-            assert (
-                self.config['model']['type'] in ['Opt', 'Llama']
-            ), 'Please set online_rotate=False'
+            # assert (
+            #     self.config['model']['type'] in ['Opt', 'Llama']
+            # ), 'Please set online_rotate=False'
             self.fp32_had = special_config.get('fp32_had', False)
         # if self.quant_config.modality != 'video_gen':
         if self.quant_config.modality == 'vision':
@@ -454,7 +454,8 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
     def replace_rotate_linears(self, block):
         for n, m in block.named_modules():
             if isinstance(m, nn.Linear) and (
-                'down_proj' in n or 'o_proj' in n or 'fc2' in n or 'out_proj' in n
+                # 'down_proj' in n or 'o_proj' in n or 'fc2' in n or 'out_proj' in n
+                'down_proj' in n or 'fc2' in n
             ):
                 subset = {'layers': {n: m}}
                 self.model.replace_module_subset(
@@ -1181,6 +1182,12 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             self.set_no_quant_layer()
 
         module = module_mapping[quant_format]
+        if self.modality == 'audio':
+            self.model.replace_audio_module_all(
+                module,
+                self.get_replacement_params(mode=quant_format, w_only=self.w_only),
+                keep_device=keep_device,
+            )
         if self.modality == 'vision':
             self.model.replace_vision_module_all(
                 module,
@@ -1284,6 +1291,11 @@ class BaseBlockwiseQuantization(BlockwiseOpt):
             copy_files(self.config.model.path, path, 'chat_template')
             for filename in glob.glob(os.path.join(self.config.model.path, '*.py')):
                 shutil.copy(filename, path)
+        elif self.config.model.type in ['Qwen3Omni']:
+            self.model.omni_model.thinker = self.model.get_model()
+            self.model.omni_model.save_pretrained(path)
+            logger.info('save model done --')
+            self.copy_tokenizer(path)
         else:
             self.model.get_model().save_pretrained(path)
             logger.info('save model done --')

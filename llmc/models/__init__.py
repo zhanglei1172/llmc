@@ -27,6 +27,7 @@ from .qwen2audio import Qwen2Audio
 from .qwen2moe import Qwen2Moe
 from .qwen3moe import Qwen3Moe
 from .qwen3omni_moe import Qwen3OmniMoe
+from .qwen3omni import Qwen3Omni
 from .qwen2vl import Qwen2VL
 from .qwen25vl import Qwen25VL
 from .qwen25vl_v4 import Qwen25VL_V4

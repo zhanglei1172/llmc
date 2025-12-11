@@ -39,9 +39,12 @@ class Qwen3Moe(BaseModel):
         return [self.model.lm_head]
 
     def get_extra_modules(self, block):
-        return {
-            'mlp': block.mlp
-        }
+        if hasattr(block, 'mlp'):
+            return {
+                'mlp': block.mlp
+            }
+        else:
+            return {}
 
     def get_pre_head_layernorm_layers(self):
         return [self.model.model.norm]
