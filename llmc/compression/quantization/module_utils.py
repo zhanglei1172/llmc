@@ -944,6 +944,10 @@ class RotateLinear(nn.Module):
         had_dim,
     ):
         super().__init__()
+        self.rotater = Rotater(
+                    online_full_had, online_partial_had, fp32_had, K, had_K, had_dim
+        )
+        weight = self.rotater.rotate(weight)
         self.register_parameter('weight', nn.Parameter(weight, requires_grad=False))
         if bias is not None:
             self.register_parameter('bias', nn.Parameter(bias, requires_grad=False))
@@ -954,9 +958,6 @@ class RotateLinear(nn.Module):
             if name.startswith('buf_'):
                 self.register_buffer(name, buf.data)
 
-        self.rotater = Rotater(
-            online_full_had, online_partial_had, fp32_had, K, had_K, had_dim
-        )
         self.register_buffer('buf_rotate', torch.tensor(True))
 
     def forward(self, x):
